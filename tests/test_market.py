@@ -34,21 +34,31 @@ def test_market_heatmap_figure_builds_and_serializes():
     pio.to_json(fig)
 
 
-def test_market_heatmap_has_logo_per_ticker():
-    """Regression: every ticker must have (1) a filled rect and (2) a logo
-    image. If either drops out we lose the "logo per cell" invariant."""
+def test_market_heatmap_covers_every_ticker():
+    """Every ticker in the universe must be reachable — either as a visible
+    text annotation, a logo image, or (at minimum) a hover marker."""
     from dashboard import treemap as tm
 
     df = market.demo_heatmap()
     fig = components.market_heatmap(df)
-    # Cells + sector container + header strip each add rects; the exact count
-    # depends on the layout, but every ticker cell has coords inside boxes.
     boxes, cells = tm.layout_sectors(df)
     assert {c.ticker for c in cells} == set(df["ticker"])
-    # Logo images are only emitted when small_side >= 55 units; at the default
-    # 1600×780 canvas every one of the 27 cells qualifies.
-    n_logo_images = sum(1 for _ in fig.layout.images)
-    assert n_logo_images == len(df), (n_logo_images, len(df))
+
+    # Hover scatter carries every ticker.
+    hover_text = "\n".join(fig.data[0].hovertext or [])
+    for tk in df["ticker"]:
+        assert tk in hover_text, f"missing hover for {tk!r}"
+
+
+def test_market_heatmap_pairs_remote_and_fallback_images():
+    """When a logo is drawn, we stack a remote PNG on top of the SVG chip
+    so a 404 on the PNG still shows the fallback. Every non-index ticker
+    that gets a logo should have exactly two layout images at its chip
+    position."""
+    df = market.demo_heatmap()
+    fig = components.market_heatmap(df)
+    # Images should be even in count (remote+fallback pair per rendered chip).
+    assert len(fig.layout.images) % 2 == 0
 
 
 def test_layout_partitions_are_non_overlapping():

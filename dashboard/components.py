@@ -449,7 +449,7 @@ def market_heatmap(df: pd.DataFrame,
             font=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
         )
 
-    # Per-ticker cells (rect + logo + ticker + %/price)
+    # Per-ticker cells (rect + logo + ticker + %/price with density budget)
     hover_x, hover_y, hover_text = [], [], []
     for c in cells:
         fill = _cell_color(c.pct)
@@ -461,54 +461,86 @@ def market_heatmap(df: pd.DataFrame,
             layer="below",
         )
 
-        # Every cell gets a logo chip; size scales with the tile.
-        small_side = min(c.w, c.h)
-        show_price = c.h >= 90
+        # Density budget — decide what fits inside this tile before drawing.
+        small = min(c.w, c.h)
+        show_logo = c.w >= 40 and c.h >= 55
+        show_ticker = c.w >= 32 and c.h >= 28
+        show_pct = c.h >= 62 and c.w >= 44
+        show_price = c.h >= 100 and c.w >= 70
 
-        chip_size = max(16.0, min(small_side * 0.28, 44.0))
-        chip_x = c.x + (c.w - chip_size) / 2
-        chip_y = c.y + max(6.0, min(small_side * 0.06, 10.0))
-        fig.add_layout_image(
-            dict(
-                source=_logos.logo_data_uri(c.ticker),
+        # Vertically centered stack when we have room; when we don't, we
+        # anchor to the top so labels never bleed past the tile bottom.
+        cx = c.x + c.w / 2
+        # Adaptive font sizes
+        ticker_font = int(max(9, min(small * 0.22, 26)))
+        pct_font = int(max(9, ticker_font - 4))
+        price_font = int(max(8, ticker_font - 6))
+        chip_size = float(max(18.0, min(small * 0.30, 44.0)))
+
+        # Compute the composed block height and center it in the tile
+        gap_a, gap_b = 6.0, 3.0
+        block_h = 0.0
+        if show_logo:
+            block_h += chip_size + gap_a
+        if show_ticker:
+            block_h += ticker_font + gap_b
+        if show_pct:
+            block_h += pct_font + gap_b
+        # Price line docks at the tile bottom, not in the centered block.
+
+        cursor_y = c.y + max(4.0, (c.h - block_h - (price_font + 6 if show_price else 0)) / 2)
+
+        if show_logo:
+            chip_x = cx - chip_size / 2
+            fig.add_layout_image(dict(
+                source=_logos.logo_source(c.ticker, prefer_remote=True),
                 xref="x", yref="y",
-                x=chip_x, y=chip_y,
+                x=chip_x, y=cursor_y,
                 sizex=chip_size, sizey=chip_size,
                 xanchor="left", yanchor="top",
                 sizing="contain", layer="above", opacity=1.0,
-            )
-        )
-        text_y = chip_y + chip_size + max(4.0, min(small_side * 0.05, 12.0))
+            ))
+            # Second image at the same position with the SVG fallback so if
+            # the remote PNG 404s the chip is still filled.
+            fig.add_layout_image(dict(
+                source=_logos.logo_data_uri(c.ticker),
+                xref="x", yref="y",
+                x=chip_x, y=cursor_y,
+                sizex=chip_size, sizey=chip_size,
+                xanchor="left", yanchor="top",
+                sizing="contain", layer="below", opacity=1.0,
+            ))
+            cursor_y += chip_size + gap_a
 
-        # Ticker label
-        ticker_font = 10 + min(int(small_side / 12), 16)  # 10–26 px
-        fig.add_annotation(
-            x=c.x + c.w / 2, y=text_y,
-            xref="x", yref="y",
-            xanchor="center", yanchor="top",
-            text=f"<b>{c.ticker}</b>",
-            showarrow=False,
-            font=dict(color=S.TEXT_STRONG, size=ticker_font, family="Inter, system-ui"),
-        )
-        # % change
-        pct_color = S.GREEN_SOFT if c.pct >= 0 else S.RED_SOFT
-        fig.add_annotation(
-            x=c.x + c.w / 2, y=text_y + ticker_font + 6,
-            xref="x", yref="y",
-            xanchor="center", yanchor="top",
-            text=f"{c.pct*100:+.2f}%",
-            showarrow=False,
-            font=dict(color=pct_color, size=max(11, ticker_font - 4),
-                      family="Inter, system-ui"),
-        )
+        if show_ticker:
+            fig.add_annotation(
+                x=cx, y=cursor_y, xref="x", yref="y",
+                xanchor="center", yanchor="top",
+                text=f"<b>{c.ticker}</b>",
+                showarrow=False,
+                font=dict(color=S.TEXT_STRONG, size=ticker_font,
+                          family="Inter, system-ui"),
+            )
+            cursor_y += ticker_font + gap_b
+
+        if show_pct:
+            pct_color = S.GREEN_SOFT if c.pct >= 0 else S.RED_SOFT
+            fig.add_annotation(
+                x=cx, y=cursor_y, xref="x", yref="y",
+                xanchor="center", yanchor="top",
+                text=f"{c.pct*100:+.2f}%",
+                showarrow=False,
+                font=dict(color=pct_color, size=pct_font,
+                          family="Inter, system-ui"),
+            )
+
         if show_price:
             fig.add_annotation(
-                x=c.x + c.w / 2, y=c.y + c.h - 6,
-                xref="x", yref="y",
+                x=cx, y=c.y + c.h - 6, xref="x", yref="y",
                 xanchor="center", yanchor="bottom",
                 text=f"${c.price:,.2f}",
                 showarrow=False,
-                font=dict(color="rgba(226,232,240,0.65)", size=10,
+                font=dict(color="rgba(226,232,240,0.55)", size=price_font,
                           family="Inter, system-ui"),
             )
 
