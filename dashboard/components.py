@@ -6,6 +6,7 @@ from typing import Optional
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 _LONG_GAMMA_COLOR = "#22c55e"
@@ -63,45 +64,54 @@ def gex_dex_pair(
     call_wall = levels.get("call_wall")
     put_wall = levels.get("put_wall")
 
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=1, cols=2, shared_yaxes=True, horizontal_spacing=0.06,
+        subplot_titles=("GEX", "DEX"),
+    )
+    fig.add_trace(
+        go.Bar(
+            y=g["strike"], x=g["gex"], orientation="h",
+            marker_color=[_LONG_GAMMA_COLOR if v >= 0 else _SHORT_GAMMA_COLOR for v in g["gex"]],
+            marker_line_width=0, name="GEX", showlegend=False,
+        ),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            y=d["strike"], x=d["dex"], orientation="h",
+            marker_color=[_LONG_GAMMA_COLOR if v >= 0 else _SHORT_GAMMA_COLOR for v in d["dex"]],
+            marker_line_width=0, name="DEX", showlegend=False,
+        ),
+        row=1, col=2,
+    )
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         height=640,
-        margin=dict(l=40, r=40, t=40, b=40),
-        showlegend=False,
-        grid=dict(rows=1, columns=2, pattern="independent"),
+        margin=dict(l=40, r=40, t=50, b=40),
+        bargap=0.15,
     )
-    fig.add_trace(go.Bar(
-        y=g["strike"], x=g["gex"], orientation="h",
-        marker_color=[_LONG_GAMMA_COLOR if v >= 0 else _SHORT_GAMMA_COLOR for v in g["gex"]],
-        marker_line_width=0,
-        name="GEX", xaxis="x", yaxis="y",
-    ))
-    fig.add_trace(go.Bar(
-        y=d["strike"], x=d["dex"], orientation="h",
-        marker_color=[_LONG_GAMMA_COLOR if v >= 0 else _SHORT_GAMMA_COLOR for v in d["dex"]],
-        marker_line_width=0,
-        name="DEX", xaxis="x2", yaxis="y2",
-    ))
-    for axis in ("xaxis", "xaxis2"):
-        fig.layout[axis].update(gridcolor="#1f2937", zerolinecolor="#374151")
-    for axis in ("yaxis", "yaxis2"):
-        fig.layout[axis].update(gridcolor="#1f2937", tickformat="$,.0f")
-    fig.layout.xaxis.domain = [0.0, 0.48]
-    fig.layout.xaxis2.domain = [0.52, 1.0]
-    fig.layout.yaxis.anchor = "x"
-    fig.layout.yaxis2.anchor = "x2"
-    fig.layout.annotations = [
-        dict(text="GEX", x=0.24, y=1.05, xref="paper", yref="paper", showarrow=False, font=dict(color=_MUTED)),
-        dict(text="DEX", x=0.76, y=1.05, xref="paper", yref="paper", showarrow=False, font=dict(color=_MUTED)),
-    ]
-    fig.add_hline(y=spot, line_dash="dot", line_color="#facc15", opacity=0.7)
+    for col in (1, 2):
+        fig.update_xaxes(gridcolor="#1f2937", zerolinecolor="#374151", row=1, col=col)
+        fig.update_yaxes(gridcolor="#1f2937", tickformat="$,.0f", row=1, col=col)
+    for ann in fig.layout.annotations:
+        ann.font = dict(color=_MUTED, size=12)
+
+    fig.add_hline(y=spot, line_dash="dot", line_color="#facc15", opacity=0.7,
+                  row=1, col=1)
+    fig.add_hline(y=spot, line_dash="dot", line_color="#facc15", opacity=0.7,
+                  row=1, col=2)
     if call_wall:
-        fig.add_hline(y=call_wall, line_dash="dash", line_color="#22c55e", opacity=0.5)
+        fig.add_hline(y=call_wall, line_dash="dash", line_color="#22c55e", opacity=0.5,
+                      row=1, col=1)
+        fig.add_hline(y=call_wall, line_dash="dash", line_color="#22c55e", opacity=0.5,
+                      row=1, col=2)
     if put_wall:
-        fig.add_hline(y=put_wall, line_dash="dash", line_color="#ef4444", opacity=0.5)
+        fig.add_hline(y=put_wall, line_dash="dash", line_color="#ef4444", opacity=0.5,
+                      row=1, col=1)
+        fig.add_hline(y=put_wall, line_dash="dash", line_color="#ef4444", opacity=0.5,
+                      row=1, col=2)
     return fig
 
 
