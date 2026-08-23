@@ -329,13 +329,14 @@ section[data-testid="stSidebar"] {{
 .pl-title .badge.demo {{ background: rgba(251,191,36,0.15); color: {AMBER}; border: 1px solid {AMBER}; }}
 .pl-title .badge.live {{ background: rgba(34,197,94,0.15); color: {GREEN}; border: 1px solid {GREEN}; }}
 
-/* Top-level view radio (styled to match reference top tabs) */
+/* Top-level pill radios (ticker row + view row) */
 [data-testid="stRadio"] > label {{ display: none; }}
 [data-testid="stRadio"] div[role="radiogroup"] {{
-    gap: 6px;
-    padding: 6px 0 12px;
+    gap: 4px;
+    padding: 6px 0 10px;
     border-bottom: 1px solid {BORDER};
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
 }}
 [data-testid="stRadio"] div[role="radiogroup"] label {{
     background: transparent !important;

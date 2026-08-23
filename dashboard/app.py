@@ -60,7 +60,6 @@ def _load_market(use_demo: bool) -> pd.DataFrame:
 def _sidebar_controls():
     st.sidebar.header("Controls")
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
-    tab_ticker = st.sidebar.selectbox("Ticker", TICKERS, index=0)
     window = st.sidebar.slider("Strike window (steps)", 5, 40, 20)
     st.sidebar.markdown("---")
     st.sidebar.subheader("Heat map")
@@ -84,7 +83,7 @@ def _sidebar_controls():
     positions = st.sidebar.data_editor(
         default_positions, num_rows="dynamic", width="stretch", key="positions"
     )
-    return use_demo, tab_ticker, window, positions, remote_logos
+    return use_demo, window, positions, remote_logos
 
 
 def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -> None:
@@ -208,15 +207,26 @@ def _render_market_heatmap(use_demo: bool, remote_logos: bool) -> None:
 
 
 def main() -> None:
-    use_demo, ticker, window, positions_df, remote_logos = _sidebar_controls()
+    use_demo, window, positions_df, remote_logos = _sidebar_controls()
 
-    view = st.radio(
-        "view",
-        options=["Gamma & Flow", "Market Heat Map"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="view_selector",
-    )
+    top_l, top_r = st.columns([3, 2])
+    with top_l:
+        ticker = st.radio(
+            "ticker",
+            options=TICKERS,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="ticker_selector",
+        )
+    with top_r:
+        view = st.radio(
+            "view",
+            options=["Gamma & Flow", "Market Heat Map"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="view_selector",
+        )
+
     if view == "Gamma & Flow":
         _render_gamma_flow(ticker, use_demo, window, positions_df)
     else:
