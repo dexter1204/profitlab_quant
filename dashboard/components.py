@@ -11,6 +11,8 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from . import styles as S
+from . import logos as _logos
+from . import treemap as _treemap
 
 
 # ── formatting helpers ─────────────────────────────────────────────────────
@@ -403,64 +405,140 @@ def _cell_color(pct: float, cap: float = 0.04) -> str:
     return _lerp(dark, red, -t)
 
 
-def market_heatmap(df: pd.DataFrame) -> go.Figure:
+def market_heatmap(df: pd.DataFrame,
+                   total_w: float = 1600.0,
+                   total_h: float = 780.0) -> go.Figure:
+    """Custom squarified treemap with per-cell brand-logo chips.
+
+    Renders on a normal Figure using paper/axis-referenced shapes,
+    images and annotations — one axis unit == one pixel-ish — so we can
+    pin logos to cells that `go.Treemap` cannot expose.
+    """
     if df.empty:
         return go.Figure()
 
-    df = df.copy()
-    df["weight"] = df["weight"].astype(float).clip(lower=0.1)
+    boxes, cells = _treemap.layout_sectors(df, total_w=total_w, total_h=total_h)
 
-    # Sector totals must equal the sum of their children for branchvalues="total".
-    sector_totals = df.groupby("sector", as_index=False)["weight"].sum()
-    sectors = sector_totals["sector"].tolist()
-    sector_weights = sector_totals["weight"].tolist()
+    fig = go.Figure()
 
-    labels = sectors + df["ticker"].tolist()
-    parents = [""] * len(sectors) + df["sector"].tolist()
-    values = sector_weights + df["weight"].tolist()
-    colors = ["rgba(17,24,39,0.85)"] * len(sectors) + [
-        _cell_color(p) for p in df["pct"].tolist()
-    ]
-    text = [f"<b>{s}</b>" for s in sectors] + [
-        f"<b>{tk}</b><br>{pct*100:+.2f}%<br>"
-        f"<span style='font-size:11px;opacity:0.75'>${price:,.2f}</span>"
-        for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
-    ]
-    customdata = [["", 0.0, 0.0]] * len(sectors) + [
-        [tk, pct, price]
-        for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
-    ]
-
-    fig = go.Figure(
-        go.Treemap(
-            labels=labels,
-            parents=parents,
-            values=values,
-            branchvalues="total",
-            marker=dict(
-                colors=colors,
-                line=dict(color=S.BG, width=2),
-                pad=dict(t=22, l=3, r=3, b=3),
-            ),
-            text=text,
-            textinfo="text",
-            textposition="middle center",
-            textfont=dict(family="Inter, system-ui", size=14, color=S.TEXT_STRONG),
-            hovertemplate="<b>%{customdata[0]}</b><br>"
-                          "change: %{customdata[1]:+.2%}<br>"
-                          "price: $%{customdata[2]:,.2f}<extra></extra>",
-            customdata=customdata,
-            tiling=dict(packing="squarify", squarifyratio=1.5, pad=1),
-            sort=True,
+    # Sector container (thin outline + header band with the sector name)
+    for box in boxes:
+        # Outer container border
+        fig.add_shape(
+            type="rect",
+            x0=box.x, y0=box.y, x1=box.x + box.w, y1=box.y + box.h,
+            line=dict(color=S.BORDER, width=1),
+            fillcolor="rgba(0,0,0,0)",
+            layer="below",
         )
-    )
+        # Sector header strip
+        fig.add_shape(
+            type="rect",
+            x0=box.x, y0=box.y,
+            x1=box.x + box.w, y1=box.y + box.header_h,
+            line=dict(color=S.BORDER, width=0),
+            fillcolor="rgba(15,23,42,0.75)",
+            layer="below",
+        )
+        fig.add_annotation(
+            x=box.x + 8, y=box.y + box.header_h / 2,
+            xref="x", yref="y",
+            xanchor="left", yanchor="middle",
+            text=f"<b>{box.sector}</b>",
+            showarrow=False,
+            font=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+        )
+
+    # Per-ticker cells (rect + logo + ticker + %/price)
+    hover_x, hover_y, hover_text = [], [], []
+    for c in cells:
+        fill = _cell_color(c.pct)
+        fig.add_shape(
+            type="rect",
+            x0=c.x + 1, y0=c.y + 1, x1=c.x + c.w - 1, y1=c.y + c.h - 1,
+            line=dict(color="rgba(0,0,0,0.45)", width=1),
+            fillcolor=fill,
+            layer="below",
+        )
+
+        # Every cell gets a logo chip; size scales with the tile.
+        small_side = min(c.w, c.h)
+        show_price = c.h >= 90
+
+        chip_size = max(16.0, min(small_side * 0.28, 44.0))
+        chip_x = c.x + (c.w - chip_size) / 2
+        chip_y = c.y + max(6.0, min(small_side * 0.06, 10.0))
+        fig.add_layout_image(
+            dict(
+                source=_logos.logo_data_uri(c.ticker),
+                xref="x", yref="y",
+                x=chip_x, y=chip_y,
+                sizex=chip_size, sizey=chip_size,
+                xanchor="left", yanchor="top",
+                sizing="contain", layer="above", opacity=1.0,
+            )
+        )
+        text_y = chip_y + chip_size + max(4.0, min(small_side * 0.05, 12.0))
+
+        # Ticker label
+        ticker_font = 10 + min(int(small_side / 12), 16)  # 10–26 px
+        fig.add_annotation(
+            x=c.x + c.w / 2, y=text_y,
+            xref="x", yref="y",
+            xanchor="center", yanchor="top",
+            text=f"<b>{c.ticker}</b>",
+            showarrow=False,
+            font=dict(color=S.TEXT_STRONG, size=ticker_font, family="Inter, system-ui"),
+        )
+        # % change
+        pct_color = S.GREEN_SOFT if c.pct >= 0 else S.RED_SOFT
+        fig.add_annotation(
+            x=c.x + c.w / 2, y=text_y + ticker_font + 6,
+            xref="x", yref="y",
+            xanchor="center", yanchor="top",
+            text=f"{c.pct*100:+.2f}%",
+            showarrow=False,
+            font=dict(color=pct_color, size=max(11, ticker_font - 4),
+                      family="Inter, system-ui"),
+        )
+        if show_price:
+            fig.add_annotation(
+                x=c.x + c.w / 2, y=c.y + c.h - 6,
+                xref="x", yref="y",
+                xanchor="center", yanchor="bottom",
+                text=f"${c.price:,.2f}",
+                showarrow=False,
+                font=dict(color="rgba(226,232,240,0.65)", size=10,
+                          family="Inter, system-ui"),
+            )
+
+        # Invisible scatter marker → gives us a real hover target per cell
+        hover_x.append(c.x + c.w / 2)
+        hover_y.append(c.y + c.h / 2)
+        hover_text.append(
+            f"<b>{c.ticker}</b> · {c.sector}<br>"
+            f"change: {c.pct*100:+.2f}%<br>price: ${c.price:,.2f}"
+        )
+
+    fig.add_trace(go.Scatter(
+        x=hover_x, y=hover_y, mode="markers",
+        marker=dict(size=1, color="rgba(0,0,0,0)"),
+        hoverinfo="text", hovertext=hover_text,
+        showlegend=False,
+    ))
+
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=8, r=8, t=8, b=8),
+        margin=dict(l=6, r=6, t=6, b=6),
         height=780,
+        xaxis=dict(range=[0, total_w], visible=False, fixedrange=True),
+        yaxis=dict(range=[0, total_h], visible=False,
+                   scaleanchor=None, autorange="reversed", fixedrange=True),
         font=dict(color=S.TEXT_STRONG, family="Inter, system-ui"),
+        hoverlabel=dict(bgcolor=S.BG_ELEVATED, bordercolor=S.BORDER,
+                        font=dict(color=S.TEXT_STRONG, family="Inter, system-ui")),
     )
     return fig
 

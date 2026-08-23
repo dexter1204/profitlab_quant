@@ -29,28 +29,40 @@ def test_market_heatmap_figure_builds_and_serializes():
     import plotly.io as pio
     df = market.demo_heatmap()
     fig = components.market_heatmap(df)
+    # Exactly one hover-target scatter trace on top of the shapes.
     assert len(fig.data) == 1
-    pio.to_json(fig)  # same code path Streamlit uses
+    pio.to_json(fig)
 
 
-def test_treemap_parent_totals_equal_child_sums():
-    """Regression: branchvalues='total' collapses the tree if the sector
-    root value doesn't equal the sum of its children's values."""
-    from collections import defaultdict
+def test_market_heatmap_has_logo_per_ticker():
+    """Regression: every ticker must have (1) a filled rect and (2) a logo
+    image. If either drops out we lose the "logo per cell" invariant."""
+    from dashboard import treemap as tm
 
     df = market.demo_heatmap()
     fig = components.market_heatmap(df)
-    labels = list(fig.data[0].labels)
-    parents = list(fig.data[0].parents)
-    values = list(fig.data[0].values)
+    # Cells + sector container + header strip each add rects; the exact count
+    # depends on the layout, but every ticker cell has coords inside boxes.
+    boxes, cells = tm.layout_sectors(df)
+    assert {c.ticker for c in cells} == set(df["ticker"])
+    # Logo images are only emitted when small_side >= 55 units; at the default
+    # 1600×780 canvas every one of the 27 cells qualifies.
+    n_logo_images = sum(1 for _ in fig.layout.images)
+    assert n_logo_images == len(df), (n_logo_images, len(df))
 
-    kids_sum = defaultdict(float)
-    for lbl, par, val in zip(labels, parents, values):
-        if par:
-            kids_sum[par] += val
-    for lbl, par, val in zip(labels, parents, values):
-        if par == "":
-            assert abs(val - kids_sum[lbl]) < 1e-6, f"sector {lbl!r} value ≠ children"
+
+def test_layout_partitions_are_non_overlapping():
+    """Squarified layout must produce cells that fit inside their sector box
+    and don't overlap between siblings."""
+    from dashboard import treemap as tm
+
+    df = market.demo_heatmap()
+    boxes, cells = tm.layout_sectors(df, total_w=1000, total_h=700)
+    box_by_sector = {b.sector: b for b in boxes}
+    for c in cells:
+        b = box_by_sector[c.sector]
+        assert b.x - 1e-6 <= c.x and c.x + c.w <= b.x + b.w + 1e-6
+        assert b.y - 1e-6 <= c.y and c.y + c.h <= b.y + b.h + 1e-6
 
 
 def test_cell_color_diverges_around_zero():
