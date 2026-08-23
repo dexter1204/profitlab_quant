@@ -19,7 +19,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from profitlab import beta as beta_mod
-from profitlab import data, demo, exposures, iv, metrics, regime
+from profitlab import data, demo, exposures, iv, market, metrics, regime
 from dashboard import components, styles
 
 
@@ -50,6 +50,13 @@ def _load_prices(use_demo: bool) -> dict[str, pd.Series]:
     return {t: data.price_history(t, period="1y") for t in TICKERS + ["SPY"]}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_market(use_demo: bool) -> pd.DataFrame:
+    if use_demo:
+        return market.demo_heatmap()
+    return market.live_heatmap()
+
+
 def _sidebar_controls():
     st.sidebar.header("Controls")
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
@@ -71,21 +78,19 @@ def _sidebar_controls():
     return use_demo, tab_ticker, window, positions
 
 
-def main() -> None:
-    use_demo, ticker, window, positions_df = _sidebar_controls()
-
+def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -> None:
     chain, spot = _load_chain(ticker, use_demo)
-    ctx = exposures.ChainContext(spot=spot, asof=pd.Timestamp.now("UTC").tz_localize(None).normalize())
+    ctx = exposures.ChainContext(
+        spot=spot, asof=pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    )
     gex = exposures.gex_by_strike(chain, ctx)
     dex = exposures.dex_by_strike(chain, ctx)
     totals = exposures.totals(chain, ctx)
     levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
 
-    # Header
     components.page_title(ticker, is_demo=use_demo)
     components.metric_strip(spot, levels, totals)
 
-    # Main body: chart + regime column
     left, right = st.columns([3, 1])
     with left:
         tabs = st.tabs(["GEX + DEX", "Heat map GEX", "Heat map DEX", "OI"])
@@ -141,7 +146,6 @@ def main() -> None:
 
     st.markdown("---")
 
-    # Beta exposure
     positions = positions_df.dropna(subset=["ticker"]).to_dict(orient="records")
     if positions:
         try:
@@ -149,6 +153,38 @@ def main() -> None:
             components.beta_panel(portfolio)
         except KeyError as e:
             st.warning(f"Missing price data for {e}. Toggle demo data or extend `_load_prices`.")
+
+
+def _render_market_heatmap(use_demo: bool) -> None:
+    df = _load_market(use_demo)
+    summary = market.summarize(df)
+    components.market_heatmap_header(summary, ticker_count_hint="click a cell to inspect")
+    st.plotly_chart(components.market_heatmap(df), use_container_width=True)
+
+    with st.expander("Universe (sortable table)"):
+        show = df.assign(
+            change=(df["pct"] * 100).round(2),
+            price=df["price"].round(2),
+            weight_b=df["weight"].round(0),
+        )[["ticker", "sector", "price", "change", "weight_b"]]
+        show = show.sort_values("change", ascending=False)
+        st.dataframe(show, hide_index=True, use_container_width=True)
+
+
+def main() -> None:
+    use_demo, ticker, window, positions_df = _sidebar_controls()
+
+    view = st.radio(
+        "view",
+        options=["Gamma & Flow", "Market Heat Map"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="view_selector",
+    )
+    if view == "Gamma & Flow":
+        _render_gamma_flow(ticker, use_demo, window, positions_df)
+    else:
+        _render_market_heatmap(use_demo)
 
 
 if __name__ == "__main__":

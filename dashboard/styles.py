@@ -329,6 +329,39 @@ section[data-testid="stSidebar"] {{
 .pl-title .badge.demo {{ background: rgba(251,191,36,0.15); color: {AMBER}; border: 1px solid {AMBER}; }}
 .pl-title .badge.live {{ background: rgba(34,197,94,0.15); color: {GREEN}; border: 1px solid {GREEN}; }}
 
+/* Top-level view radio (styled to match reference top tabs) */
+[data-testid="stRadio"] > label {{ display: none; }}
+[data-testid="stRadio"] div[role="radiogroup"] {{
+    gap: 6px;
+    padding: 6px 0 12px;
+    border-bottom: 1px solid {BORDER};
+    margin-bottom: 8px;
+}}
+[data-testid="stRadio"] div[role="radiogroup"] label {{
+    background: transparent !important;
+    border: 1px solid transparent;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+}}
+[data-testid="stRadio"] div[role="radiogroup"] label p {{
+    color: {MUTED} !important;
+    font-size: 11px !important;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin: 0 !important;
+}}
+[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {{
+    background: {BG_ELEVATED} !important;
+    box-shadow: inset 0 -2px 0 0 {GREEN};
+}}
+[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) p {{
+    color: {TEXT_STRONG} !important;
+}}
+/* Hide the radio circles */
+[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child {{ display: none; }}
+
 /* DataFrame polish */
 [data-testid="stDataFrame"] {{
     border: 1px solid {BORDER};

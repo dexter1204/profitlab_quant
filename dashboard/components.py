@@ -30,6 +30,11 @@ def _fmt_level(x: Optional[float]) -> str:
     return "—" if x is None or pd.isna(x) else f"${x:,.0f}"
 
 
+def _pct_chip(pct: float) -> str:
+    cls = "pos" if pct >= 0 else "neg"
+    return f"<span class='delta {cls}'>{pct*100:+.2f}%</span>"
+
+
 def _pct_from_spot(level: Optional[float], spot: float) -> str:
     if level is None or pd.isna(level):
         return ""
@@ -371,6 +376,108 @@ def _statrow(label: str, value: str, cls: str = "") -> str:
         f"<span class='lbl'>{label}</span>"
         f"<span class='val {cls}'>{value}</span>"
         f"</div>"
+    )
+
+
+# ── market heat map ────────────────────────────────────────────────────────
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> str:
+    r = int(a[0] + (b[0] - a[0]) * t)
+    g = int(a[1] + (b[1] - a[1]) * t)
+    bl = int(a[2] + (b[2] - a[2]) * t)
+    return f"rgb({r},{g},{bl})"
+
+
+def _cell_color(pct: float, cap: float = 0.04) -> str:
+    """Diverging red↔black↔green based on daily % change."""
+    dark = _hex_to_rgb("#0b1220")
+    green = _hex_to_rgb(S.GREEN)
+    red = _hex_to_rgb(S.RED)
+    t = max(-1.0, min(1.0, pct / cap))
+    if t >= 0:
+        return _lerp(dark, green, t)
+    return _lerp(dark, red, -t)
+
+
+def market_heatmap(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        return go.Figure()
+
+    # Sector roots
+    sectors = df["sector"].unique().tolist()
+    labels = list(sectors) + df["ticker"].tolist()
+    parents = [""] * len(sectors) + df["sector"].tolist()
+    values = [0.0] * len(sectors) + df["weight"].astype(float).tolist()
+    colors = ["rgba(0,0,0,0)"] * len(sectors) + [
+        _cell_color(p) for p in df["pct"].tolist()
+    ]
+    text = [""] * len(sectors) + [
+        f"<b>{tk}</b><br>{pct*100:+.2f}%<br><span style='opacity:0.7'>${price:,.2f}</span>"
+        for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
+    ]
+    customdata = [[None, None, None]] * len(sectors) + [
+        [tk, pct, price]
+        for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
+    ]
+
+    fig = go.Figure(
+        go.Treemap(
+            labels=labels,
+            parents=parents,
+            values=values,
+            branchvalues="total",
+            marker=dict(
+                colors=colors,
+                line=dict(color=S.BG, width=2),
+                pad=dict(t=18, l=2, r=2, b=2),
+            ),
+            text=text,
+            textinfo="text",
+            textposition="middle center",
+            textfont=dict(family="Inter, system-ui", size=14, color=S.TEXT_STRONG),
+            hovertemplate="<b>%{customdata[0]}</b><br>"
+                          "change: %{customdata[1]:+.2%}<br>"
+                          "price: $%{customdata[2]:,.2f}<extra></extra>",
+            customdata=customdata,
+            tiling=dict(packing="squarify", pad=1),
+        )
+    )
+    # Sector titles show at the packed root level; style them muted.
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=8, r=8, t=8, b=8),
+        height=780,
+        treemapcolorway=[S.MUTED],
+        font=dict(color=S.TEXT_STRONG, family="Inter, system-ui"),
+    )
+    return fig
+
+
+def market_heatmap_header(summary, ticker_count_hint: str = "") -> None:
+    up = summary.n_up
+    down = summary.n_down
+    breadth = summary.breadth_pct
+    best_tk, best_pct = summary.best
+    worst_tk, worst_pct = summary.worst
+    st.markdown(
+        f"<div class='pl-title'>"
+        f"<span class='tk'>Market Heat Map</span>"
+        f"<span class='sub'>{summary.n_symbols} símbolos · pasa el mouse para detalle</span>"
+        f"</div>"
+        f"<div class='pl-ribbon'>"
+        f"{_cell('spot','SYMBOLS', f'{summary.n_symbols}', ticker_count_hint)}"
+        f"{_cell('call','ADVANCERS', str(up), f'{breadth*100:.0f}% breadth')}"
+        f"{_cell('put','DECLINERS', str(down), f'{(1-breadth)*100:.0f}% breadth')}"
+        f"{_cell('call','BEST', best_tk, _pct_chip(best_pct))}"
+        f"{_cell('put','WORST', worst_tk, _pct_chip(worst_pct))}"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
 
