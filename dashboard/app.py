@@ -82,7 +82,7 @@ def _sidebar_controls():
         ]
     )
     positions = st.sidebar.data_editor(
-        default_positions, num_rows="dynamic", use_container_width=True, key="positions"
+        default_positions, num_rows="dynamic", width="stretch", key="positions"
     )
     return use_demo, tab_ticker, window, positions, remote_logos
 
@@ -107,7 +107,7 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
         with tabs[0]:
             st.plotly_chart(
                 components.gex_dex_pair(gex, dex, spot, levels, strike_window=window),
-                use_container_width=True,
+                width="stretch",
             )
         with tabs[1]:
             gex_grid = exposures.gex_by_strike_expiry(chain, ctx)
@@ -116,12 +116,12 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                     gex_grid, "gex", spot, levels=levels,
                     strike_window=window, title="GEX heat map (strike × expiry)",
                 ),
-                use_container_width=True,
+                width="stretch",
             )
             with st.expander("Top strikes by |GEX|"):
                 st.dataframe(
                     gex.sort_values("gex", key=abs, ascending=False).head(30),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                 )
         with tabs[2]:
             dex_grid = exposures.dex_by_strike_expiry(chain, ctx)
@@ -130,12 +130,12 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                     dex_grid, "dex", spot, levels=levels,
                     strike_window=window, title="DEX heat map (strike × expiry)",
                 ),
-                use_container_width=True,
+                width="stretch",
             )
             with st.expander("Top strikes by |DEX|"):
                 st.dataframe(
                     dex.sort_values("dex", key=abs, ascending=False).head(30),
-                    hide_index=True, use_container_width=True,
+                    hide_index=True, width="stretch",
                 )
         with tabs[3]:
             atm_row = chain.iloc[(chain["strike"] - spot).abs().argsort()].head(1).iloc[0]
@@ -152,7 +152,7 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                     sx, sy, sz, ticker=ticker, strike=k, iv=atm_iv_val,
                     spot=spot, kind=kind,
                 ),
-                use_container_width=True,
+                width="stretch",
             )
             st.caption(
                 "Model: Black-Scholes · Axes: Spot Price × Time to Maturity · "
@@ -163,7 +163,7 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                 chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
                 .pivot(index="strike", columns="type", values="oi").fillna(0)
             )
-            st.dataframe(by_strike, use_container_width=True)
+            st.dataframe(by_strike, width="stretch")
 
     with right:
         prices = _load_prices(use_demo)
@@ -192,7 +192,7 @@ def _render_market_heatmap(use_demo: bool, remote_logos: bool) -> None:
     components.market_heatmap_header(summary, ticker_count_hint="click a cell to inspect")
     st.plotly_chart(
         components.market_heatmap(df, prefer_remote_logos=remote_logos),
-        use_container_width=True,
+        width="stretch",
     )
 
     with st.expander("Universe (sortable table)"):
@@ -202,7 +202,7 @@ def _render_market_heatmap(use_demo: bool, remote_logos: bool) -> None:
             weight_b=df["weight"].round(0),
         )[["ticker", "sector", "price", "change", "weight_b"]]
         show = show.sort_values("change", ascending=False)
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        st.dataframe(show, hide_index=True, width="stretch")
 
 
 def main() -> None:

@@ -411,13 +411,18 @@ def delta_surface(
             ),
         )
     )
-    axis_style = dict(
-        gridcolor="rgba(148,163,184,0.18)",
-        zerolinecolor="rgba(148,163,184,0.3)",
-        color=S.MUTED,
-        showbackground=False,
-        title=dict(font=dict(color=S.MUTED, family="Inter, system-ui")),
-    )
+    def _axis(title: str, **extra):
+        base = dict(
+            gridcolor="rgba(148,163,184,0.18)",
+            zerolinecolor="rgba(148,163,184,0.3)",
+            color=S.MUTED,
+            showbackground=False,
+            title=dict(text=title, font=dict(color=S.MUTED,
+                                             family="Inter, system-ui")),
+        )
+        base.update(extra)
+        return base
+
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -425,10 +430,9 @@ def delta_surface(
         height=680,
         margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
-            xaxis=dict(title="Spot Price ($)", tickprefix="$",
-                       tickformat=",.0f", **axis_style),
-            yaxis=dict(title="Time to Maturity (Days)", **axis_style),
-            zaxis=dict(title="Delta", tickformat=".2f", **axis_style),
+            xaxis=_axis("Spot Price ($)", tickprefix="$", tickformat=",.0f"),
+            yaxis=_axis("Time to Maturity (Days)"),
+            zaxis=_axis("Delta", tickformat=".2f"),
             camera=dict(eye=dict(x=1.5, y=-1.7, z=0.9)),
             aspectmode="cube",
         ),
@@ -675,7 +679,7 @@ def beta_panel(portfolio) -> None:
         price=df["price"].round(2),
     )[["ticker", "shares", "delta_shares", "price", "beta",
        "notional", "beta_dollars", "beta_adj_delta_dollars"]]
-    st.dataframe(display, hide_index=True, use_container_width=True)
+    st.dataframe(display, hide_index=True, width="stretch")
 
     cells = [
         _cell("spot",  "PORTFOLIO β",  f"{portfolio.portfolio_beta:.2f}"),
