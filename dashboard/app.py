@@ -63,6 +63,15 @@ def _sidebar_controls():
     tab_ticker = st.sidebar.selectbox("Ticker", TICKERS, index=0)
     window = st.sidebar.slider("Strike window (steps)", 5, 40, 20)
     st.sidebar.markdown("---")
+    st.sidebar.subheader("Heat map")
+    remote_logos = st.sidebar.toggle(
+        "Real brand logos (requires internet)",
+        value=False,
+        help="Off: solid brand-color chip with the ticker initial (offline, no glitches). "
+             "On: fetches the real logo PNG from FinancialModelingPrep — needs internet on "
+             "the browser side and can leave a blank chip if the ticker isn't listed there.",
+    )
+    st.sidebar.markdown("---")
     st.sidebar.subheader("Portfolio")
     default_positions = pd.DataFrame(
         [
@@ -75,7 +84,7 @@ def _sidebar_controls():
     positions = st.sidebar.data_editor(
         default_positions, num_rows="dynamic", use_container_width=True, key="positions"
     )
-    return use_demo, tab_ticker, window, positions
+    return use_demo, tab_ticker, window, positions, remote_logos
 
 
 def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -> None:
@@ -155,11 +164,14 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             st.warning(f"Missing price data for {e}. Toggle demo data or extend `_load_prices`.")
 
 
-def _render_market_heatmap(use_demo: bool) -> None:
+def _render_market_heatmap(use_demo: bool, remote_logos: bool) -> None:
     df = _load_market(use_demo)
     summary = market.summarize(df)
     components.market_heatmap_header(summary, ticker_count_hint="click a cell to inspect")
-    st.plotly_chart(components.market_heatmap(df), use_container_width=True)
+    st.plotly_chart(
+        components.market_heatmap(df, prefer_remote_logos=remote_logos),
+        use_container_width=True,
+    )
 
     with st.expander("Universe (sortable table)"):
         show = df.assign(
@@ -172,7 +184,7 @@ def _render_market_heatmap(use_demo: bool) -> None:
 
 
 def main() -> None:
-    use_demo, ticker, window, positions_df = _sidebar_controls()
+    use_demo, ticker, window, positions_df, remote_logos = _sidebar_controls()
 
     view = st.radio(
         "view",
@@ -184,7 +196,7 @@ def main() -> None:
     if view == "Gamma & Flow":
         _render_gamma_flow(ticker, use_demo, window, positions_df)
     else:
-        _render_market_heatmap(use_demo)
+        _render_market_heatmap(use_demo, remote_logos)
 
 
 if __name__ == "__main__":

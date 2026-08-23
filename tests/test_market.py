@@ -50,15 +50,21 @@ def test_market_heatmap_covers_every_ticker():
         assert tk in hover_text, f"missing hover for {tk!r}"
 
 
-def test_market_heatmap_pairs_remote_and_fallback_images():
-    """When a logo is drawn, we stack a remote PNG on top of the SVG chip
-    so a 404 on the PNG still shows the fallback. Every non-index ticker
-    that gets a logo should have exactly two layout images at its chip
-    position."""
+def test_market_heatmap_uses_single_image_per_cell():
+    """Regression: previously we stacked SVG + PNG per cell, which showed
+    both stacked when the PNG loaded. Now each rendered cell has one image."""
     df = market.demo_heatmap()
-    fig = components.market_heatmap(df)
-    # Images should be even in count (remote+fallback pair per rendered chip).
-    assert len(fig.layout.images) % 2 == 0
+    fig_offline = components.market_heatmap(df, prefer_remote_logos=False)
+    fig_online = components.market_heatmap(df, prefer_remote_logos=True)
+    # Same count either way (one image per logo-eligible cell).
+    assert len(fig_offline.layout.images) == len(fig_online.layout.images)
+    # Offline: every image is a data-URI. Online: every image is an https URL
+    # unless the ticker is in the remote-skip set.
+    for img in fig_offline.layout.images:
+        assert str(img.source).startswith("data:image/svg+xml"), img.source
+    for img in fig_online.layout.images:
+        src = str(img.source)
+        assert src.startswith("https://") or src.startswith("data:image/svg+xml"), src
 
 
 def test_layout_partitions_are_non_overlapping():

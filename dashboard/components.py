@@ -407,7 +407,8 @@ def _cell_color(pct: float, cap: float = 0.04) -> str:
 
 def market_heatmap(df: pd.DataFrame,
                    total_w: float = 1600.0,
-                   total_h: float = 780.0) -> go.Figure:
+                   total_h: float = 780.0,
+                   prefer_remote_logos: bool = False) -> go.Figure:
     """Custom squarified treemap with per-cell brand-logo chips.
 
     Renders on a normal Figure using paper/axis-referenced shapes,
@@ -418,6 +419,7 @@ def market_heatmap(df: pd.DataFrame,
         return go.Figure()
 
     boxes, cells = _treemap.layout_sectors(df, total_w=total_w, total_h=total_h)
+    _prefer_remote_logos = prefer_remote_logos  # captured by the loop below
 
     fig = go.Figure()
 
@@ -493,22 +495,12 @@ def market_heatmap(df: pd.DataFrame,
         if show_logo:
             chip_x = cx - chip_size / 2
             fig.add_layout_image(dict(
-                source=_logos.logo_source(c.ticker, prefer_remote=True),
+                source=_logos.logo_source(c.ticker, prefer_remote=_prefer_remote_logos),
                 xref="x", yref="y",
                 x=chip_x, y=cursor_y,
                 sizex=chip_size, sizey=chip_size,
                 xanchor="left", yanchor="top",
                 sizing="contain", layer="above", opacity=1.0,
-            ))
-            # Second image at the same position with the SVG fallback so if
-            # the remote PNG 404s the chip is still filled.
-            fig.add_layout_image(dict(
-                source=_logos.logo_data_uri(c.ticker),
-                xref="x", yref="y",
-                x=chip_x, y=cursor_y,
-                sizex=chip_size, sizey=chip_size,
-                xanchor="left", yanchor="top",
-                sizing="contain", layer="below", opacity=1.0,
             ))
             cursor_y += chip_size + gap_a
 
