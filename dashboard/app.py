@@ -20,13 +20,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from profitlab import beta as beta_mod
 from profitlab import data, demo, exposures, iv, metrics, regime
-from dashboard import components
+from dashboard import components, styles
 
 
 TICKERS = ["QQQ", "SPY", "GLD", "SLV", "NQ", "AAPL", "TSLA", "NVDA"]
 
 
-st.set_page_config(page_title="ProfitLab Quant — Gamma & Beta", layout="wide")
+st.set_page_config(
+    page_title="ProfitLab Quant — Gamma & Beta",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+styles.inject()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -77,7 +82,7 @@ def main() -> None:
     levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
 
     # Header
-    st.markdown(f"### **{ticker}**  ·  Gamma & Beta Exposure")
+    components.page_title(ticker, is_demo=use_demo)
     components.metric_strip(spot, levels, totals)
 
     # Main body: chart + regime column
