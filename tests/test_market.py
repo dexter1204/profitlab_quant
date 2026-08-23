@@ -33,6 +33,26 @@ def test_market_heatmap_figure_builds_and_serializes():
     pio.to_json(fig)  # same code path Streamlit uses
 
 
+def test_treemap_parent_totals_equal_child_sums():
+    """Regression: branchvalues='total' collapses the tree if the sector
+    root value doesn't equal the sum of its children's values."""
+    from collections import defaultdict
+
+    df = market.demo_heatmap()
+    fig = components.market_heatmap(df)
+    labels = list(fig.data[0].labels)
+    parents = list(fig.data[0].parents)
+    values = list(fig.data[0].values)
+
+    kids_sum = defaultdict(float)
+    for lbl, par, val in zip(labels, parents, values):
+        if par:
+            kids_sum[par] += val
+    for lbl, par, val in zip(labels, parents, values):
+        if par == "":
+            assert abs(val - kids_sum[lbl]) < 1e-6, f"sector {lbl!r} value ≠ children"
+
+
 def test_cell_color_diverges_around_zero():
     green = components._cell_color(0.05)
     red = components._cell_color(-0.05)

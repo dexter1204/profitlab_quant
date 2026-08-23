@@ -407,19 +407,26 @@ def market_heatmap(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return go.Figure()
 
-    # Sector roots
-    sectors = df["sector"].unique().tolist()
-    labels = list(sectors) + df["ticker"].tolist()
+    df = df.copy()
+    df["weight"] = df["weight"].astype(float).clip(lower=0.1)
+
+    # Sector totals must equal the sum of their children for branchvalues="total".
+    sector_totals = df.groupby("sector", as_index=False)["weight"].sum()
+    sectors = sector_totals["sector"].tolist()
+    sector_weights = sector_totals["weight"].tolist()
+
+    labels = sectors + df["ticker"].tolist()
     parents = [""] * len(sectors) + df["sector"].tolist()
-    values = [0.0] * len(sectors) + df["weight"].astype(float).tolist()
-    colors = ["rgba(0,0,0,0)"] * len(sectors) + [
+    values = sector_weights + df["weight"].tolist()
+    colors = ["rgba(17,24,39,0.85)"] * len(sectors) + [
         _cell_color(p) for p in df["pct"].tolist()
     ]
-    text = [""] * len(sectors) + [
-        f"<b>{tk}</b><br>{pct*100:+.2f}%<br><span style='opacity:0.7'>${price:,.2f}</span>"
+    text = [f"<b>{s}</b>" for s in sectors] + [
+        f"<b>{tk}</b><br>{pct*100:+.2f}%<br>"
+        f"<span style='font-size:11px;opacity:0.75'>${price:,.2f}</span>"
         for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
     ]
-    customdata = [[None, None, None]] * len(sectors) + [
+    customdata = [["", 0.0, 0.0]] * len(sectors) + [
         [tk, pct, price]
         for tk, pct, price in zip(df["ticker"], df["pct"], df["price"])
     ]
@@ -433,7 +440,7 @@ def market_heatmap(df: pd.DataFrame) -> go.Figure:
             marker=dict(
                 colors=colors,
                 line=dict(color=S.BG, width=2),
-                pad=dict(t=18, l=2, r=2, b=2),
+                pad=dict(t=22, l=3, r=3, b=3),
             ),
             text=text,
             textinfo="text",
@@ -443,17 +450,16 @@ def market_heatmap(df: pd.DataFrame) -> go.Figure:
                           "change: %{customdata[1]:+.2%}<br>"
                           "price: $%{customdata[2]:,.2f}<extra></extra>",
             customdata=customdata,
-            tiling=dict(packing="squarify", pad=1),
+            tiling=dict(packing="squarify", squarifyratio=1.5, pad=1),
+            sort=True,
         )
     )
-    # Sector titles show at the packed root level; style them muted.
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=8, r=8, t=8, b=8),
         height=780,
-        treemapcolorway=[S.MUTED],
         font=dict(color=S.TEXT_STRONG, family="Inter, system-ui"),
     )
     return fig
