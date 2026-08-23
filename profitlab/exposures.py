@@ -94,6 +94,29 @@ def dex_by_strike(chain: pd.DataFrame, ctx: ChainContext) -> pd.DataFrame:
     return _by_strike(chain, dex_per_contract(chain, ctx)).rename(columns={"value": "dex"})
 
 
+def _by_strike_expiry(chain: pd.DataFrame, values: np.ndarray) -> pd.DataFrame:
+    df = pd.DataFrame(
+        {
+            "strike": chain["strike"].to_numpy(dtype=float),
+            "expiry": pd.to_datetime(chain["expiry"]),
+            "value": values * chain["oi"].to_numpy(dtype=float),
+        }
+    )
+    return (
+        df.groupby(["strike", "expiry"], as_index=False)["value"].sum()
+        .sort_values(["expiry", "strike"])
+    )
+
+
+def gex_by_strike_expiry(chain: pd.DataFrame, ctx: ChainContext) -> pd.DataFrame:
+    """Long-form GEX with strike × expiry granularity (feeds the heat map)."""
+    return _by_strike_expiry(chain, gex_per_contract(chain, ctx)).rename(columns={"value": "gex"})
+
+
+def dex_by_strike_expiry(chain: pd.DataFrame, ctx: ChainContext) -> pd.DataFrame:
+    return _by_strike_expiry(chain, dex_per_contract(chain, ctx)).rename(columns={"value": "dex"})
+
+
 def vanna_by_strike(chain: pd.DataFrame, ctx: ChainContext) -> pd.DataFrame:
     t, is_call, strike, iv, _ = _prep(chain, ctx)
     v = greeks.vanna(ctx.spot, strike, t, ctx.r, iv, ctx.q)

@@ -105,6 +105,77 @@ def gex_dex_pair(
     return fig
 
 
+def exposure_heatmap(
+    long_df: pd.DataFrame,
+    value_col: str,
+    spot: float,
+    levels: Optional[dict] = None,
+    strike_window: int = 20,
+    title: str = "GEX heat map",
+) -> go.Figure:
+    """Strike × expiry heat map. `long_df` has columns [strike, expiry, <value_col>]."""
+    levels = levels or {}
+    if long_df.empty:
+        return go.Figure()
+
+    strikes = pd.Series(sorted(long_df["strike"].unique()))
+    step = float(strikes.diff().dropna().median()) if len(strikes) > 1 else 1.0
+    lo, hi = spot - strike_window * step, spot + strike_window * step
+    df = long_df[(long_df["strike"] >= lo) & (long_df["strike"] <= hi)].copy()
+    if df.empty:
+        return go.Figure()
+
+    df["expiry_label"] = pd.to_datetime(df["expiry"]).dt.strftime("%Y-%m-%d")
+    grid = (
+        df.pivot_table(index="strike", columns="expiry_label", values=value_col, aggfunc="sum")
+        .sort_index(ascending=True)
+        .sort_index(axis=1)
+    )
+
+    zmax = float(max(abs(grid.min().min()), abs(grid.max().max())) or 1.0)
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=grid.values,
+            x=grid.columns.tolist(),
+            y=grid.index.tolist(),
+            colorscale=[
+                (0.0, _SHORT_GAMMA_COLOR),
+                (0.5, "#0b1220"),
+                (1.0, _LONG_GAMMA_COLOR),
+            ],
+            zmid=0.0,
+            zmin=-zmax,
+            zmax=zmax,
+            colorbar=dict(title=value_col.upper(), tickfont=dict(color=_MUTED)),
+            hovertemplate="strike=%{y}<br>expiry=%{x}<br>" + value_col + "=%{z:,.0f}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=640,
+        margin=dict(l=40, r=40, t=40, b=40),
+        xaxis=dict(title="Expiration", gridcolor="#1f2937"),
+        yaxis=dict(title="Strike", gridcolor="#1f2937", tickformat="$,.0f"),
+        title=dict(text=title, x=0.02, y=0.98, font=dict(color=_MUTED, size=13)),
+    )
+    fig.add_hline(y=spot, line_dash="dot", line_color="#facc15", opacity=0.7,
+                  annotation_text=f"spot ${spot:,.2f}", annotation_position="top left",
+                  annotation_font_color="#facc15")
+    for key, color, label in (
+        ("call_wall", "#22c55e", "call wall"),
+        ("put_wall", "#ef4444", "put wall"),
+        ("gamma_flip", "#facc15", "g-flip"),
+    ):
+        v = levels.get(key)
+        if v is not None:
+            fig.add_hline(y=v, line_dash="dash", line_color=color, opacity=0.5,
+                          annotation_text=label, annotation_position="top right",
+                          annotation_font_color=color)
+    return fig
+
+
 def regime_panel(regime, iv_snapshot, ticker: str, spot: float) -> None:
     """Right-hand column: gamma regime + IV premium block."""
     st.markdown(f"### GAMMA REGIME")

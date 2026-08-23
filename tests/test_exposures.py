@@ -38,6 +38,16 @@ def test_key_levels_produce_finite_values():
         assert 0.5 * spot <= lv[k] <= 2.0 * spot
 
 
+def test_gex_grid_sums_match_strike_totals():
+    chain = demo.demo_chain("QQQ")
+    ctx = _ctx(demo.DEMO_SPOTS["QQQ"])
+    grid = exposures.gex_by_strike_expiry(chain, ctx)
+    per_strike = grid.groupby("strike", as_index=False)["gex"].sum().sort_values("strike")
+    reference = exposures.gex_by_strike(chain, ctx).sort_values("strike").reset_index(drop=True)
+    merged = per_strike.reset_index(drop=True).merge(reference, on="strike", suffixes=("_grid", "_ref"))
+    assert (merged["gex_grid"] - merged["gex_ref"]).abs().max() < 1e-6
+
+
 def test_regime_flips_around_gamma_flip():
     chain = demo.demo_chain("QQQ")
     spot = demo.DEMO_SPOTS["QQQ"]

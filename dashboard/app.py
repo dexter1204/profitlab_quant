@@ -90,11 +90,33 @@ def main() -> None:
                 use_container_width=True,
             )
         with tabs[1]:
-            st.dataframe(gex.sort_values("gex", key=abs, ascending=False).head(30),
-                         hide_index=True, use_container_width=True)
+            gex_grid = exposures.gex_by_strike_expiry(chain, ctx)
+            st.plotly_chart(
+                components.exposure_heatmap(
+                    gex_grid, "gex", spot, levels=levels,
+                    strike_window=window, title="GEX heat map (strike × expiry)",
+                ),
+                use_container_width=True,
+            )
+            with st.expander("Top strikes by |GEX|"):
+                st.dataframe(
+                    gex.sort_values("gex", key=abs, ascending=False).head(30),
+                    hide_index=True, use_container_width=True,
+                )
         with tabs[2]:
-            st.dataframe(dex.sort_values("dex", key=abs, ascending=False).head(30),
-                         hide_index=True, use_container_width=True)
+            dex_grid = exposures.dex_by_strike_expiry(chain, ctx)
+            st.plotly_chart(
+                components.exposure_heatmap(
+                    dex_grid, "dex", spot, levels=levels,
+                    strike_window=window, title="DEX heat map (strike × expiry)",
+                ),
+                use_container_width=True,
+            )
+            with st.expander("Top strikes by |DEX|"):
+                st.dataframe(
+                    dex.sort_values("dex", key=abs, ascending=False).head(30),
+                    hide_index=True, use_container_width=True,
+                )
         with tabs[3]:
             by_strike = (
                 chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
