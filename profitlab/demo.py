@@ -31,7 +31,11 @@ def demo_chain(ticker: str = "QQQ", asof: pd.Timestamp | None = None) -> pd.Data
     step = max(round(spot * 0.003 * 2) / 2, 0.5)
     strikes = np.arange(spot - 30 * step, spot + 30 * step + step, step)
     asof = asof or pd.Timestamp.now("UTC").tz_localize(None).normalize()
-    expiries = [asof + pd.Timedelta(days=d) for d in (7, 21, 45)]
+    # Daily front-month like a real index-ETF chain (0DTE through 8DTE),
+    # weekly further out, then monthlies — gives the strike × expiry grid the
+    # column density you see on real vendor dashboards.
+    day_offsets = list(range(0, 9)) + [14, 21, 30, 45, 60]
+    expiries = [asof + pd.Timedelta(days=d) for d in day_offsets]
 
     rng = np.random.default_rng(hash(ticker) & 0xFFFFFFFF)
     rows = []

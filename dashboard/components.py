@@ -203,15 +203,29 @@ def gex_dex_pair(
     return fig
 
 
-# ── heat map ───────────────────────────────────────────────────────────────
+# ── heat map (table-style, matches reference) ──────────────────────────────
+def _fmt_millions(x: float) -> str:
+    ax = abs(x)
+    if ax >= 1_000_000_000:
+        return f"{x / 1e9:,.1f}B"
+    if ax >= 1_000_000:
+        return f"{x / 1e6:,.1f}M"
+    if ax >= 1_000:
+        return f"{x / 1e3:,.1f}K"
+    return f"{x:,.0f}"
+
+
 def exposure_heatmap(
     long_df: pd.DataFrame,
     value_col: str,
     spot: float,
     levels: Optional[dict] = None,
     strike_window: int = 20,
-    title: str = "GEX heat map",
+    title: str = "GAMMA EXPOSURE",
+    asof: Optional[pd.Timestamp] = None,
 ) -> go.Figure:
+    """Table-style GEX/DEX grid: rows = strikes, columns = days-to-expiry,
+    each cell shows the numeric value with a color-coded background."""
     levels = levels or {}
     if long_df.empty:
         return go.Figure()
@@ -223,57 +237,126 @@ def exposure_heatmap(
     if df.empty:
         return go.Figure()
 
-    df["expiry_label"] = pd.to_datetime(df["expiry"]).dt.strftime("%Y-%m-%d")
-    grid = (
-        df.pivot_table(index="strike", columns="expiry_label", values=value_col, aggfunc="sum")
-        .sort_index()
-        .sort_index(axis=1)
+    # Column key: days-to-expiry (0D, 1D, …) relative to `asof`.
+    asof = asof or pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    exp_dates = pd.to_datetime(df["expiry"])
+    df["dte"] = (exp_dates - asof).dt.days.clip(lower=0)
+    df["dte_label"] = df["dte"].apply(lambda d: f"{d}D")
+
+    dte_order = (
+        df[["dte", "dte_label"]].drop_duplicates().sort_values("dte")["dte_label"].tolist()
     )
-    zmax = float(max(abs(grid.min().min()), abs(grid.max().max())) or 1.0)
+    grid = (
+        df.pivot_table(index="strike", columns="dte_label", values=value_col, aggfunc="sum")
+        .reindex(columns=dte_order)
+        .sort_index(ascending=False)  # highest strike at top like the reference
+    )
+    z = grid.values
+    zmax = float(np.nanmax(np.abs(z)) or 1.0)
+
+    # Text per cell (only for finite values), muted for magnitudes < 0.5M
+    text = np.empty_like(z, dtype=object)
+    text_color = np.empty_like(z, dtype=object)
+    for i in range(z.shape[0]):
+        for j in range(z.shape[1]):
+            v = z[i, j]
+            if np.isnan(v):
+                text[i, j] = ""
+                text_color[i, j] = "rgba(0,0,0,0)"
+            else:
+                text[i, j] = _fmt_millions(v)
+                text_color[i, j] = "rgba(226,232,240,0.95)"
 
     fig = go.Figure(
         data=go.Heatmap(
-            z=grid.values,
+            z=z,
             x=grid.columns.tolist(),
             y=grid.index.tolist(),
+            text=text,
+            texttemplate="%{text}",
+            textfont=dict(color=S.TEXT_STRONG, size=11, family="Inter, system-ui"),
+            # Reference uses BLUE for +GEX and RED for -GEX (dealer sign),
+            # with near-zero blending into the panel background.
             colorscale=[
-                (0.0,  S.RED),
-                (0.35, "#3a0f14"),
-                (0.5,  S.BG),
-                (0.65, "#0f3a1a"),
-                (1.0,  S.GREEN),
+                (0.0,  "#7f1d1d"),   # -zmax → deep red
+                (0.30, "#ef4444"),   # red
+                (0.48, "#0b1220"),   # near zero → panel bg
+                (0.52, "#0b1220"),
+                (0.70, "#3b82f6"),   # blue
+                (1.0,  "#1e3a8a"),   # +zmax → deep blue
             ],
             zmid=0.0, zmin=-zmax, zmax=zmax,
-            xgap=1, ygap=1,
+            xgap=2, ygap=2,
+            showscale=True,
             colorbar=dict(
                 title=dict(text=value_col.upper(), font=dict(color=S.MUTED, size=10)),
                 tickfont=dict(color=S.MUTED, size=9),
-                outlinewidth=0, thickness=10,
+                outlinewidth=0, thickness=8, len=0.5,
+                tickformat=".2s",
             ),
-            hovertemplate="strike=%{y:$,.0f}<br>expiry=%{x}<br>" + value_col + "=%{z:,.0f}<extra></extra>",
+            hovertemplate=(
+                "strike=%{y:$,.0f}<br>dte=%{x}<br>"
+                + value_col + "=%{z:,.0f}<extra></extra>"
+            ),
         )
     )
+    row_h = 26
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        height=680, margin=dict(l=48, r=48, t=44, b=30),
-        xaxis=dict(title="", gridcolor=S.GRID, tickfont=dict(color=S.MUTED, size=10)),
-        yaxis=dict(title="", gridcolor=S.GRID, tickformat="$,.0f",
-                   tickfont=dict(color=S.MUTED, size=10)),
-        title=dict(text=title, x=0.02, y=0.98,
+        height=max(420, min(920, row_h * len(grid.index) + 100)),
+        margin=dict(l=64, r=48, t=48, b=24),
+        xaxis=dict(
+            title="", side="top",
+            tickfont=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+            showgrid=False, showline=False, ticks="",
+        ),
+        yaxis=dict(
+            title="", autorange="reversed",  # already sorted desc, but ensure
+            tickformat="$,.0f",
+            tickfont=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+            showgrid=False, showline=False, ticks="",
+        ),
+        title=dict(text=title, x=0.005, y=0.995, xanchor="left", yanchor="top",
                    font=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
-        font=dict(color=S.TEXT),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
     )
-    fig.add_hline(y=spot, line_dash="dot", line_color=S.YELLOW, opacity=0.6, line_width=1)
-    for k, color in (
-        ("call_wall", S.COLOR_CALL),
-        ("put_wall", S.COLOR_PUT),
-        ("gamma_flip", S.COLOR_GAMMA),
+    # Spot row highlight: overlay a border rectangle at y == closest strike to spot.
+    if len(grid.index) > 0:
+        closest = min(grid.index.tolist(), key=lambda s: abs(s - spot))
+        fig.add_shape(
+            type="rect",
+            xref="x", yref="y",
+            x0=-0.5, x1=len(grid.columns) - 0.5,
+            y0=closest - step / 2, y1=closest + step / 2,
+            line=dict(color=S.YELLOW, width=1.5),
+            fillcolor="rgba(250,204,21,0.06)",
+            layer="above",
+        )
+        fig.add_annotation(
+            xref="paper", yref="y",
+            x=-0.01, y=closest, xanchor="right", yanchor="middle",
+            text=f"<b>${closest:,.0f}</b> SPOT",
+            showarrow=False,
+            font=dict(color=S.YELLOW, size=10, family="Inter, system-ui"),
+        )
+    # Key-level markers on the y-axis
+    for k, color, label in (
+        ("call_wall", S.COLOR_CALL, "CW"),
+        ("put_wall", S.COLOR_PUT, "PW"),
+        ("gamma_flip", S.COLOR_GAMMA, "γ-FLIP"),
     ):
         v = levels.get(k)
-        if v is not None:
-            fig.add_hline(y=v, line_dash="dash", line_color=color, opacity=0.4, line_width=1)
+        if v is None or not (grid.index.min() <= v <= grid.index.max()):
+            continue
+        fig.add_annotation(
+            xref="paper", yref="y",
+            x=1.01, y=v, xanchor="left", yanchor="middle",
+            text=f"<b>{label}</b>",
+            showarrow=False,
+            font=dict(color=color, size=10, family="Inter, system-ui"),
+        )
     return fig
 
 

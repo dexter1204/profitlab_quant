@@ -114,7 +114,8 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             st.plotly_chart(
                 components.exposure_heatmap(
                     gex_grid, "gex", spot, levels=levels,
-                    strike_window=window, title="GEX heat map (strike × expiry)",
+                    strike_window=window, title="GAMMA EXPOSURE",
+                    asof=ctx.asof,
                 ),
                 width="stretch",
             )
@@ -128,7 +129,8 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             st.plotly_chart(
                 components.exposure_heatmap(
                     dex_grid, "dex", spot, levels=levels,
-                    strike_window=window, title="DEX heat map (strike × expiry)",
+                    strike_window=window, title="DELTA EXPOSURE",
+                    asof=ctx.asof,
                 ),
                 width="stretch",
             )
