@@ -56,6 +56,34 @@ def demo_chain(ticker: str = "QQQ", asof: pd.Timestamp | None = None) -> pd.Data
     return df
 
 
+def demo_bars(ticker: str = "QQQ", n: int = 390, interval_min: int = 1,
+              asof: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Synthetic intraday OHLCV bars for offline demo. Deterministic per ticker."""
+    rng = np.random.default_rng(hash(("bars", ticker)) & 0xFFFFFFFF)
+    spot = DEMO_SPOTS.get(ticker, 100.0)
+    asof = asof or pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    # Trading day 09:30 → 16:00 in minute bars (390 by default).
+    open_time = asof + pd.Timedelta(hours=9, minutes=30)
+    ts = pd.date_range(start=open_time, periods=n, freq=f"{interval_min}min")
+
+    # Geometric Brownian motion, small vol
+    dt = interval_min / (60 * 6.5)  # fraction of trading day
+    sigma = 0.14
+    mu = 0.0
+    rets = rng.normal((mu - 0.5 * sigma * sigma) * dt, sigma * np.sqrt(dt), size=n)
+    close_path = spot * np.exp(np.cumsum(rets))
+    # Each bar's OHLC is close + intra-bar noise around the close.
+    intrabar = rng.normal(0, spot * sigma * np.sqrt(dt) * 0.6, size=(n, 3))
+    open_ = np.r_[spot, close_path[:-1]]
+    high = np.maximum(np.maximum(open_, close_path), close_path + np.abs(intrabar[:, 0]))
+    low = np.minimum(np.minimum(open_, close_path), close_path - np.abs(intrabar[:, 1]))
+    volume = np.abs(rng.normal(2000, 1500, size=n)) + 400
+    return pd.DataFrame({
+        "ts": ts, "open": open_, "high": high, "low": low,
+        "close": close_path, "volume": volume,
+    })
+
+
 def demo_prices() -> dict[str, pd.Series]:
     """Deterministic 1y daily closes for the demo tickers plus SPY benchmark."""
     rng = np.random.default_rng(20250823)

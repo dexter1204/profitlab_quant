@@ -464,6 +464,112 @@ def _statrow(label: str, value: str, cls: str = "") -> str:
     )
 
 
+# ── candlestick chart with option-level overlays ───────────────────────────
+_LEVEL_STYLE = {
+    "call_wall":   (S.COLOR_CALL, "Call Wall"),
+    "put_wall":    (S.COLOR_PUT, "Put Wall"),
+    "gamma_flip":  (S.COLOR_GAMMA, "Gamma Flip"),
+    "delta_flip":  (S.COLOR_DELTA, "Delta Flip"),
+    "delta_wall":  (S.COLOR_DELTA, "Delta Wall"),
+    "max_pain":    (S.COLOR_MAX_PAIN, "Max Pain"),
+}
+
+
+def price_chart(
+    bars: pd.DataFrame,
+    spot: float,
+    levels: dict,
+    ticker: str,
+    *,
+    show_levels: Optional[list[str]] = None,
+    band_pct: float = 0.0006,  # half-thickness of the colored band around a level
+    show_bands: bool = True,
+) -> go.Figure:
+    """Candlestick chart + volume subplot with gamma/delta level overlays."""
+    show_levels = show_levels or list(_LEVEL_STYLE.keys())
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.78, 0.22], vertical_spacing=0.02,
+    )
+    fig.add_trace(
+        go.Candlestick(
+            x=bars["ts"], open=bars["open"], high=bars["high"],
+            low=bars["low"], close=bars["close"],
+            increasing_line_color=S.GREEN_SOFT, decreasing_line_color=S.RED_SOFT,
+            increasing_fillcolor=S.GREEN_SOFT, decreasing_fillcolor=S.RED_SOFT,
+            line=dict(width=1),
+            showlegend=False,
+            name=ticker,
+        ),
+        row=1, col=1,
+    )
+    # Volume bars — colored by candle direction
+    up = bars["close"] >= bars["open"]
+    vol_colors = np.where(up, S.GREEN_SOFT, S.RED_SOFT)
+    fig.add_trace(
+        go.Bar(
+            x=bars["ts"], y=bars["volume"],
+            marker=dict(color=vol_colors, line=dict(width=0)),
+            showlegend=False, name="volume",
+            hovertemplate="%{y:,.0f}<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+
+    # Level overlays
+    for key in show_levels:
+        v = levels.get(key)
+        if v is None or not np.isfinite(v):
+            continue
+        color, label = _LEVEL_STYLE[key]
+        if show_bands:
+            band = v * band_pct
+            fig.add_hrect(
+                y0=v - band, y1=v + band,
+                fillcolor=color, opacity=0.18,
+                line_width=0, row=1, col=1,
+            )
+        fig.add_hline(
+            y=v, line=dict(color=color, width=1.2, dash="solid"),
+            opacity=0.85, row=1, col=1,
+        )
+        # Left-side label (annotation) so it doesn't clash with the price axis.
+        fig.add_annotation(
+            xref="x domain", yref="y",
+            x=0.01, y=v, xanchor="left", yanchor="bottom",
+            text=f"<b>{label}</b> ${v:,.2f}",
+            showarrow=False,
+            font=dict(color=color, size=10, family="Inter, system-ui"),
+        )
+
+    # Spot dashed line
+    fig.add_hline(
+        y=spot, line=dict(color=S.YELLOW, width=1, dash="dash"),
+        opacity=0.55, row=1, col=1,
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=720,
+        margin=dict(l=48, r=48, t=40, b=30),
+        xaxis_rangeslider_visible=False,
+        bargap=0.1,
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+        hovermode="x unified",
+    )
+    for r in (1, 2):
+        fig.update_xaxes(gridcolor=S.GRID, showline=False,
+                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
+        fig.update_yaxes(gridcolor=S.GRID, showline=False,
+                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
+    fig.update_yaxes(tickformat="$,.2f", row=1, col=1)
+    fig.update_yaxes(tickformat=".2s", row=2, col=1)
+    return fig
+
+
 # ── delta surface (3D) ─────────────────────────────────────────────────────
 def delta_surface(
     spot_axis, days_axis, delta_grid, *,

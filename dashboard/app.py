@@ -57,6 +57,16 @@ def _load_market(use_demo: bool) -> pd.DataFrame:
     return market.live_heatmap()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_bars(ticker: str, use_demo: bool, interval: str, period: str) -> pd.DataFrame:
+    if use_demo:
+        # Map interval string → minutes for demo generator
+        minutes = {"1m": 1, "2m": 2, "3m": 3, "5m": 5, "15m": 15, "1d": 60 * 24}[interval]
+        n = 390 if interval.endswith("m") and minutes <= 15 else 60
+        return demo.demo_bars(ticker, n=n, interval_min=minutes)
+    return data.intraday_bars(ticker, interval=interval, period=period)
+
+
 def _sidebar_controls():
     st.sidebar.header("Controls")
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
@@ -187,6 +197,55 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             st.warning(f"Missing price data for {e}. Toggle demo data or extend `_load_prices`.")
 
 
+def _render_chart(ticker: str, use_demo: bool) -> None:
+    ctrl_l, ctrl_r = st.columns([3, 2])
+    with ctrl_l:
+        interval = st.radio(
+            "timeframe",
+            options=["1m", "2m", "3m", "5m", "15m", "1d"],
+            index=0, horizontal=True, label_visibility="collapsed",
+            key="chart_interval",
+        )
+    with ctrl_r:
+        show_levels = st.multiselect(
+            "levels",
+            options=list(components._LEVEL_STYLE.keys()),
+            default=["call_wall", "put_wall", "gamma_flip", "delta_flip", "max_pain"],
+            format_func=lambda k: components._LEVEL_STYLE[k][1],
+            label_visibility="collapsed",
+            key="chart_levels",
+        )
+
+    chain, spot = _load_chain(ticker, use_demo)
+    ctx = exposures.ChainContext(
+        spot=spot, asof=pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    )
+    gex = exposures.gex_by_strike(chain, ctx)
+    dex = exposures.dex_by_strike(chain, ctx)
+    levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
+
+    period_for = {"1m": "1d", "2m": "1d", "3m": "1d", "5m": "5d",
+                  "15m": "1mo", "1d": "6mo"}[interval]
+    try:
+        bars = _load_bars(ticker, use_demo, interval, period_for)
+    except Exception as e:
+        st.warning(f"Couldn't load bars for {ticker}: {e}")
+        return
+
+    components.page_title(ticker, is_demo=use_demo)
+    st.plotly_chart(
+        components.price_chart(bars, spot=spot, levels=levels,
+                               ticker=ticker, show_levels=show_levels),
+        width="stretch",
+    )
+    cap_bits = [
+        f"Long γ" if levels.get("gamma_flip") and spot > levels["gamma_flip"] else "Short γ"
+    ]
+    if levels.get("gamma_flip"):
+        cap_bits.append(f"Flip ${levels['gamma_flip']:,.2f}")
+    st.caption(" · ".join(cap_bits))
+
+
 def _render_market_heatmap(use_demo: bool, remote_logos: bool) -> None:
     df = _load_market(use_demo)
     summary = market.summarize(df)
@@ -221,7 +280,7 @@ def main() -> None:
     with top_r:
         view = st.radio(
             "view",
-            options=["Gamma & Flow", "Market Heat Map"],
+            options=["Gamma & Flow", "Chart", "Market Heat Map"],
             horizontal=True,
             label_visibility="collapsed",
             key="view_selector",
@@ -229,6 +288,8 @@ def main() -> None:
 
     if view == "Gamma & Flow":
         _render_gamma_flow(ticker, use_demo, window, positions_df)
+    elif view == "Chart":
+        _render_chart(ticker, use_demo)
     else:
         _render_market_heatmap(use_demo, remote_logos)
 
