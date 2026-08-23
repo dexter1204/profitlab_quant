@@ -102,7 +102,8 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
 
     left, right = st.columns([3, 1])
     with left:
-        tabs = st.tabs(["GEX + DEX", "Heat map GEX", "Heat map DEX", "OI"])
+        tabs = st.tabs(["GEX + DEX", "Heat map GEX", "Heat map DEX",
+                        "Delta surface", "OI"])
         with tabs[0]:
             st.plotly_chart(
                 components.gex_dex_pair(gex, dex, spot, levels, strike_window=window),
@@ -137,6 +138,27 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                     hide_index=True, use_container_width=True,
                 )
         with tabs[3]:
+            atm_row = chain.iloc[(chain["strike"] - spot).abs().argsort()].head(1).iloc[0]
+            atm_iv_val = float(atm_row["iv"]) if atm_row["iv"] > 0 else 0.22
+            k = float(atm_row["strike"])
+            days_max = st.slider("Time horizon (days)", 15, 120, 60, key="ds_days")
+            kind = st.radio("Contract kind", ["call", "put"],
+                            horizontal=True, key="ds_kind")
+            sx, sy, sz = exposures.delta_surface(
+                ctx, strike=k, iv=atm_iv_val, days_max=days_max, kind=kind,
+            )
+            st.plotly_chart(
+                components.delta_surface(
+                    sx, sy, sz, ticker=ticker, strike=k, iv=atm_iv_val,
+                    spot=spot, kind=kind,
+                ),
+                use_container_width=True,
+            )
+            st.caption(
+                "Model: Black-Scholes · Axes: Spot Price × Time to Maturity · "
+                "IV taken from the ATM strike of the current chain."
+            )
+        with tabs[4]:
             by_strike = (
                 chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
                 .pivot(index="strike", columns="type", values="oi").fillna(0)

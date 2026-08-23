@@ -135,6 +135,36 @@ def charm_by_strike(chain: pd.DataFrame, ctx: ChainContext) -> pd.DataFrame:
     return _by_strike(chain, values).rename(columns={"value": "charm"})
 
 
+def delta_surface(
+    ctx: ChainContext,
+    strike: float,
+    iv: float,
+    spot_min: float | None = None,
+    spot_max: float | None = None,
+    days_max: int = 60,
+    n_spot: int = 60,
+    n_time: int = 45,
+    kind: str = "call",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Black-Scholes delta grid over (spot, time-to-expiry) at fixed strike and IV.
+
+    Returns (spot_axis, days_axis, delta_grid) with delta_grid shape
+    (n_time, n_spot). Delta is dimensionless in [-1, 1]; multiply by
+    contract multiplier × spot outside if you want dollar-delta per contract.
+    """
+    from . import greeks
+
+    spot_min = spot_min if spot_min is not None else ctx.spot * 0.85
+    spot_max = spot_max if spot_max is not None else ctx.spot * 1.15
+    spot_axis = np.linspace(spot_min, spot_max, n_spot)
+    days_axis = np.linspace(1.0, float(days_max), n_time)
+    t_axis = days_axis / 365.0
+
+    S, T = np.meshgrid(spot_axis, t_axis)
+    grid = greeks.delta(S, strike, T, ctx.r, iv, ctx.q, kind=kind)
+    return spot_axis, days_axis, np.asarray(grid, dtype=float)
+
+
 def totals(chain: pd.DataFrame, ctx: ChainContext) -> dict:
     return {
         "gex": float(gex_by_strike(chain, ctx)["gex"].sum()),

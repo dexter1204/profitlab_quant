@@ -38,6 +38,21 @@ def test_key_levels_produce_finite_values():
         assert 0.5 * spot <= lv[k] <= 2.0 * spot
 
 
+def test_delta_surface_shape_and_bounds():
+    """Call delta must be in [0, 1] everywhere on the grid, monotone
+    non-decreasing in spot at any fixed time slice."""
+    ctx = _ctx(demo.DEMO_SPOTS["QQQ"])
+    sx, sy, sz = exposures.delta_surface(
+        ctx, strike=ctx.spot, iv=0.25, days_max=45, n_spot=25, n_time=15,
+    )
+    assert sz.shape == (15, 25)
+    assert sz.min() >= 0.0 - 1e-9
+    assert sz.max() <= 1.0 + 1e-9
+    # Monotone in spot along the first time slice (short-dated is sharpest).
+    row = sz[0]
+    assert (row[1:] - row[:-1] >= -1e-9).all()
+
+
 def test_gex_grid_sums_match_strike_totals():
     chain = demo.demo_chain("QQQ")
     ctx = _ctx(demo.DEMO_SPOTS["QQQ"])

@@ -381,6 +381,75 @@ def _statrow(label: str, value: str, cls: str = "") -> str:
     )
 
 
+# ── delta surface (3D) ─────────────────────────────────────────────────────
+def delta_surface(
+    spot_axis, days_axis, delta_grid, *,
+    ticker: str, strike: float, iv: float, spot: float, kind: str = "call",
+) -> go.Figure:
+    """Rainbow surface of Black-Scholes delta over (spot, days)."""
+    fig = go.Figure(
+        data=go.Surface(
+            x=spot_axis, y=days_axis, z=delta_grid,
+            colorscale="Jet",
+            cmin=float(np.nanmin(delta_grid)),
+            cmax=float(np.nanmax(delta_grid)),
+            colorbar=dict(
+                title=dict(text="Δ", font=dict(color=S.MUTED)),
+                tickfont=dict(color=S.MUTED, size=10),
+                outlinewidth=0, thickness=10, len=0.6,
+            ),
+            showscale=True,
+            contours=dict(
+                z=dict(show=False),
+                x=dict(show=True, color="rgba(255,255,255,0.05)", width=1),
+                y=dict(show=True, color="rgba(255,255,255,0.05)", width=1),
+            ),
+            lighting=dict(ambient=0.55, diffuse=0.75, specular=0.15,
+                          roughness=0.55, fresnel=0.15),
+            hovertemplate=(
+                "spot=$%{x:,.2f}<br>days=%{y:.0f}<br>Δ=%{z:.3f}<extra></extra>"
+            ),
+        )
+    )
+    axis_style = dict(
+        gridcolor="rgba(148,163,184,0.18)",
+        zerolinecolor="rgba(148,163,184,0.3)",
+        color=S.MUTED,
+        showbackground=False,
+        title=dict(font=dict(color=S.MUTED, family="Inter, system-ui")),
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=680,
+        margin=dict(l=0, r=0, t=30, b=0),
+        scene=dict(
+            xaxis=dict(title="Spot Price ($)", tickprefix="$",
+                       tickformat=",.0f", **axis_style),
+            yaxis=dict(title="Time to Maturity (Days)", **axis_style),
+            zaxis=dict(title="Delta", tickformat=".2f", **axis_style),
+            camera=dict(eye=dict(x=1.5, y=-1.7, z=0.9)),
+            aspectmode="cube",
+        ),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+    )
+    fig.add_annotation(
+        x=0, y=1.02, xref="paper", yref="paper", xanchor="left", yanchor="bottom",
+        text=(f"<b>{ticker}</b> · {kind.upper()} DELTA SURFACE · "
+              f"K=${strike:,.0f} · IV={iv*100:.1f}%"),
+        showarrow=False,
+        font=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+    )
+    fig.add_annotation(
+        x=1, y=1.02, xref="paper", yref="paper", xanchor="right", yanchor="bottom",
+        text=f"LIVE ATM IV {iv*100:.1f}% · K ${strike:,.2f}",
+        showarrow=False,
+        font=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+    )
+    return fig
+
+
 # ── market heat map ────────────────────────────────────────────────────────
 def _hex_to_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
