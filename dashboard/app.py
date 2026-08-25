@@ -10,6 +10,7 @@ Query params:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -70,6 +71,35 @@ def _load_bars(ticker: str, use_demo: bool, interval: str, period: str) -> pd.Da
 def _sidebar_controls():
     st.sidebar.header("Controls")
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
+
+    st.sidebar.subheader("Live data vendor")
+    vendor = st.sidebar.selectbox(
+        "Vendor",
+        options=["yfinance", "polygon"],
+        index=0 if os.environ.get("PROFITLAB_VENDOR", "yfinance") == "yfinance" else 1,
+        help="yfinance: retail delayed, no key. polygon: pro data, needs key.",
+        disabled=use_demo,
+    )
+    os.environ["PROFITLAB_VENDOR"] = vendor
+    if vendor == "polygon":
+        key = st.sidebar.text_input(
+            "POLYGON_API_KEY",
+            value=os.environ.get("POLYGON_API_KEY", ""),
+            type="password",
+            help="Session-only. Set POLYGON_API_KEY env var to persist.",
+            disabled=use_demo,
+        )
+        if key:
+            os.environ["POLYGON_API_KEY"] = key
+        base = st.sidebar.text_input(
+            "POLYGON_BASE_URL",
+            value=os.environ.get("POLYGON_BASE_URL", "https://api.polygon.io"),
+            help="Use https://api.market/api/v1/service/polygon.io/polygon for the api.market gateway.",
+            disabled=use_demo,
+        )
+        if base:
+            os.environ["POLYGON_BASE_URL"] = base.strip()
+
     window = st.sidebar.slider("Strike window (steps)", 5, 40, 20)
     st.sidebar.markdown("---")
     st.sidebar.subheader("Heat map")
@@ -106,7 +136,7 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
     totals = exposures.totals(chain, ctx)
     levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
 
-    components.page_title(ticker, is_demo=use_demo)
+    components.page_title(ticker, is_demo=use_demo, vendor=data.vendor_name())
     components.metric_strip(spot, levels, totals)
 
     left, right = st.columns([3, 1])
@@ -303,7 +333,7 @@ def _render_chart(ticker: str, use_demo: bool) -> None:
         st.warning(f"Couldn't load bars for {ticker}: {e}")
         return
 
-    components.page_title(ticker, is_demo=use_demo)
+    components.page_title(ticker, is_demo=use_demo, vendor=data.vendor_name())
     st.plotly_chart(
         components.price_chart(bars, spot=spot, levels=levels,
                                ticker=ticker, show_levels=show_levels),

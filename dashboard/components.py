@@ -46,9 +46,12 @@ def _pct_from_spot(level: Optional[float], spot: float) -> str:
 
 
 # ── page title ─────────────────────────────────────────────────────────────
-def page_title(ticker: str, is_demo: bool) -> None:
-    badge = "<span class='badge demo'>DEMO DATA</span>" if is_demo \
-            else "<span class='badge live'>● LIVE</span>"
+def page_title(ticker: str, is_demo: bool, vendor: str = "") -> None:
+    if is_demo:
+        badge = "<span class='badge demo'>DEMO DATA</span>"
+    else:
+        vname = vendor.upper() if vendor else "LIVE"
+        badge = f"<span class='badge live'>● LIVE · {vname}</span>"
     st.markdown(
         f"<div class='pl-title'><span class='tk'>{ticker}</span>"
         f"<span class='sub'>Gamma &amp; Beta Exposure</span>{badge}</div>",

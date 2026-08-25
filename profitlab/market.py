@@ -100,24 +100,17 @@ def live_heatmap(
     tickers: list[str] | None = None,
     period: str = "5d",
 ) -> pd.DataFrame:
-    """Fetch last close + previous close via yfinance and build the heatmap frame.
-
-    Falls back to a size-only proxy for `weight` (last price × 1) — replace
-    with a real market-cap feed for production.
-    """
-    import yfinance as yf
+    """Fetch last close + previous close per ticker via whatever vendor
+    the dispatcher picks (yfinance or polygon). Builds the heat-map frame."""
+    from . import data as pdata  # dispatcher
 
     ticks = tickers or TICKERS
     sectors = {t: s for t, s, _ in UNIVERSE}
     weights = {t: w for t, _, w in UNIVERSE}
-    data = yf.download(
-        " ".join(ticks), period=period, interval="1d",
-        group_by="ticker", auto_adjust=True, progress=False, threads=True,
-    )
     rows = []
     for tk in ticks:
         try:
-            hist = data[tk]["Close"].dropna()
+            hist = pdata.price_history(tk, period=period, interval="1d").dropna()
             if len(hist) < 2:
                 continue
             last, prev = float(hist.iloc[-1]), float(hist.iloc[-2])

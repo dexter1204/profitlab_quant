@@ -1,7 +1,7 @@
-"""Market-data loaders backed by yfinance.
+"""yfinance-backed market-data loader.
 
-Replace this module with your own vendor adapter for production — the rest
-of the library only depends on the schema documented in `exposures`.
+Free and retail-delayed. Fine for prototyping; not for production. Every
+function returns the schema documented in `profitlab.data.__init__`.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import pandas as pd
 
 
 def _yf():
-    import yfinance as yf  # imported lazily so the library works without it
+    import yfinance as yf
     return yf
 
 
@@ -30,7 +30,6 @@ def spot(ticker: str) -> float:
 
 
 def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.DataFrame:
-    """Fetch OHLCV bars via yfinance. Returns [ts, open, high, low, close, volume]."""
     yf = _yf()
     df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
     if df.empty:
@@ -51,7 +50,6 @@ def option_chain(
     expiries: Optional[list[str]] = None,
     max_expiries: int = 4,
 ) -> pd.DataFrame:
-    """Return a normalized chain DataFrame across `max_expiries` nearest expiries."""
     yf = _yf()
     tk = yf.Ticker(ticker)
     available = list(tk.options)
@@ -62,7 +60,7 @@ def option_chain(
     for exp in chosen:
         try:
             c = tk.option_chain(exp)
-        except Exception:  # pragma: no cover - vendor flakiness
+        except Exception:
             continue
         for kind, part in (("call", c.calls), ("put", c.puts)):
             df = part.copy()
@@ -72,19 +70,16 @@ def option_chain(
     if not frames:
         raise RuntimeError(f"Empty option chain for {ticker!r}")
     raw = pd.concat(frames, ignore_index=True)
-    out = pd.DataFrame(
-        {
-            "strike": raw["strike"].astype(float),
-            "expiry": pd.to_datetime(raw["expiry"]),
-            "type": raw["type"].astype(str),
-            "oi": raw.get("openInterest", 0).fillna(0).astype(float),
-            "iv": raw.get("impliedVolatility", np.nan).astype(float),
-            "bid": raw.get("bid", np.nan).astype(float),
-            "ask": raw.get("ask", np.nan).astype(float),
-            "last": raw.get("lastPrice", np.nan).astype(float),
-        }
-    )
-    # IVs from yfinance can be zero or absurd; clip to a reasonable band.
+    out = pd.DataFrame({
+        "strike": raw["strike"].astype(float),
+        "expiry": pd.to_datetime(raw["expiry"]),
+        "type": raw["type"].astype(str),
+        "oi": raw.get("openInterest", 0).fillna(0).astype(float),
+        "iv": raw.get("impliedVolatility", np.nan).astype(float),
+        "bid": raw.get("bid", np.nan).astype(float),
+        "ask": raw.get("ask", np.nan).astype(float),
+        "last": raw.get("lastPrice", np.nan).astype(float),
+    })
     out.loc[(out["iv"] <= 0.01) | (out["iv"] > 5.0), "iv"] = np.nan
     out["iv"] = out["iv"].fillna(out["iv"].median())
     return out
