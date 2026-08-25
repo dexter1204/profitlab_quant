@@ -730,6 +730,143 @@ def vol_surface(iv_grid: pd.DataFrame, spot: float, asof: pd.Timestamp) -> go.Fi
     return fig
 
 
+# ── OI distribution (mirrored bars puts ↔ calls) ───────────────────────────
+def oi_distribution(
+    chain: pd.DataFrame,
+    spot: float,
+    strike_window: int = 30,
+    normalize: bool = True,
+) -> go.Figure:
+    """Mirrored horizontal bar chart of open interest per strike — puts
+    extending left (red), calls extending right (green), spot row
+    highlighted. Values are shown as % of total OI when `normalize=True`,
+    else raw contract counts."""
+    if chain.empty:
+        return go.Figure()
+
+    df = chain.copy()
+    df["type"] = df["type"].str.lower()
+    by_strike = df.groupby(["strike", "type"], as_index=False)["oi"].sum()
+    pivot = by_strike.pivot(index="strike", columns="type", values="oi").fillna(0.0)
+    if "call" not in pivot.columns:
+        pivot["call"] = 0.0
+    if "put" not in pivot.columns:
+        pivot["put"] = 0.0
+
+    total = float(pivot["call"].sum() + pivot["put"].sum()) or 1.0
+    if normalize:
+        pivot["call"] = pivot["call"] / total
+        pivot["put"] = pivot["put"] / total
+
+    # Window: strike_window steps around spot
+    strikes = np.sort(pivot.index.to_numpy())
+    step = float(np.median(np.diff(strikes))) if len(strikes) > 1 else 1.0
+    lo, hi = spot - strike_window * step, spot + strike_window * step
+    view = pivot[(pivot.index >= lo) & (pivot.index <= hi)].sort_index()
+
+    y = view.index.tolist()
+    call_x = view["call"].to_numpy()
+    put_x = -view["put"].to_numpy()   # negative → extends leftward
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=y, x=put_x, orientation="h",
+        marker=dict(color=S.RED_SOFT, line=dict(width=0)),
+        name="Put OI %" if normalize else "Put OI",
+        hovertemplate="strike=%{y:$,.0f}<br>put=%{customdata:.2%}<extra></extra>"
+                      if normalize else
+                      "strike=%{y:$,.0f}<br>put=%{customdata:,.0f}<extra></extra>",
+        customdata=view["put"].to_numpy(),
+    ))
+    fig.add_trace(go.Bar(
+        y=y, x=call_x, orientation="h",
+        marker=dict(color=S.GREEN_SOFT, line=dict(width=0)),
+        name="Call OI %" if normalize else "Call OI",
+        hovertemplate="strike=%{y:$,.0f}<br>call=%{x:.2%}<extra></extra>"
+                      if normalize else
+                      "strike=%{y:$,.0f}<br>call=%{x:,.0f}<extra></extra>",
+    ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        barmode="overlay",
+        bargap=0.15,
+        height=max(420, min(1200, 22 * len(y) + 120)),
+        margin=dict(l=64, r=64, t=48, b=32),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1.0,
+            font=dict(color=S.MUTED, size=10),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        showlegend=True,
+        xaxis=dict(
+            zeroline=True, zerolinecolor=S.BORDER, zerolinewidth=1,
+            gridcolor=S.GRID,
+            tickfont=dict(color=S.MUTED, size=10),
+            tickformat=".1%" if normalize else ",.0f",
+            title="",
+        ),
+        yaxis=dict(
+            gridcolor=S.GRID, tickformat="$,.0f",
+            tickfont=dict(color=S.MUTED, size=10),
+            title="",
+        ),
+        title=dict(text="OI DISTRIBUTION", x=0.005, y=0.995,
+                   xanchor="left", yanchor="top",
+                   font=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+    )
+
+    # Symmetric x-axis so puts and calls share the same scale
+    xmax = float(max(abs(put_x.min() if len(put_x) else 0.0),
+                     abs(call_x.max() if len(call_x) else 0.0), 1e-6))
+    fig.update_xaxes(range=[-xmax * 1.05, xmax * 1.05])
+
+    # Spot row highlight + right-side strike labels via annotations
+    if y:
+        closest = min(y, key=lambda s: abs(s - spot))
+        fig.add_hline(y=closest, line=dict(color=S.YELLOW, width=1.2, dash="dash"),
+                      opacity=0.7)
+        fig.add_annotation(
+            xref="paper", yref="y",
+            x=1.005, y=closest, xanchor="left", yanchor="middle",
+            text=f"<b>${closest:,.0f}</b> SPOT",
+            showarrow=False,
+            font=dict(color=S.YELLOW, size=10, family="Inter, system-ui"),
+        )
+    return fig
+
+
+def oi_by_strike_table(chain: pd.DataFrame, spot: float,
+                       strike_window: int = 30, normalize: bool = True) -> pd.DataFrame:
+    """Display-ready OI table: STRIKE | CALL OI | PUT OI | TOTAL, sorted
+    descending by strike and filtered to the spot window. Values are
+    fractions when normalize=True (formatted by the UI layer), raw
+    contract counts otherwise."""
+    df = chain.copy()
+    df["type"] = df["type"].str.lower()
+    pivot = (df.groupby(["strike", "type"], as_index=False)["oi"].sum()
+               .pivot(index="strike", columns="type", values="oi").fillna(0.0))
+    if "call" not in pivot.columns:
+        pivot["call"] = 0.0
+    if "put" not in pivot.columns:
+        pivot["put"] = 0.0
+    if normalize:
+        total = float(pivot["call"].sum() + pivot["put"].sum()) or 1.0
+        pivot = pivot / total
+    pivot["total"] = pivot["call"] + pivot["put"]
+
+    strikes = np.sort(pivot.index.to_numpy())
+    step = float(np.median(np.diff(strikes))) if len(strikes) > 1 else 1.0
+    lo, hi = spot - strike_window * step, spot + strike_window * step
+    view = pivot[(pivot.index >= lo) & (pivot.index <= hi)].sort_index(ascending=False)
+    view = view.reset_index()[["strike", "call", "put", "total"]]
+    view.columns = ["strike", "call_oi", "put_oi", "total"]
+    return view
+
+
 # ── candlestick chart with option-level overlays ───────────────────────────
 _LEVEL_STYLE = {
     "call_wall":   (S.COLOR_CALL, "Call Wall"),

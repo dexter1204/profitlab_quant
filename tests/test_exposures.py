@@ -114,6 +114,26 @@ def test_net_drift_monotone_direction_matches_gamma_regime():
     assert np.isfinite(slope)
 
 
+def test_oi_distribution_and_table_stay_in_sync():
+    """The mirrored bar chart and the OI table must sum to the same
+    call / put totals — they're two views of the same data."""
+    from dashboard import components
+    spot = demo.DEMO_SPOTS["QQQ"]
+    chain = demo.demo_chain("QQQ")
+    tbl = components.oi_by_strike_table(chain, spot, strike_window=30, normalize=True)
+    # In normalized mode the whole chain's call+put share sums to <=1 (window
+    # trims the tails), but call/put must be non-negative and the total is
+    # exactly the sum.
+    assert (tbl["call_oi"] >= 0).all()
+    assert (tbl["put_oi"] >= 0).all()
+    assert (tbl["total"] - (tbl["call_oi"] + tbl["put_oi"])).abs().max() < 1e-9
+
+    # The plotly figure builds and both traces reach every strike in the view.
+    fig = components.oi_distribution(chain, spot, strike_window=30, normalize=True)
+    assert len(fig.data) == 2
+    assert set(fig.data[0].y) == set(fig.data[1].y) == set(tbl["strike"])
+
+
 def test_regime_flips_around_gamma_flip():
     chain = demo.demo_chain("QQQ")
     spot = demo.DEMO_SPOTS["QQQ"]

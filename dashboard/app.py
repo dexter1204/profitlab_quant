@@ -212,11 +212,39 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                 "Median IV per (strike × DTE) cell from the current chain."
             )
         with tabs[8]:
-            by_strike = (
-                chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
-                .pivot(index="strike", columns="type", values="oi").fillna(0)
-            )
-            st.dataframe(by_strike, width="stretch")
+            n_strikes = int(chain["strike"].nunique())
+            top_left, top_right = st.columns([1, 4])
+            with top_left:
+                st.markdown(
+                    f"<div class='pl-title' style='margin:0'>"
+                    f"<span class='tk' style='font-size:14px'>OI BY STRIKE</span>"
+                    f"<span class='sub'>{n_strikes} strikes</span></div>",
+                    unsafe_allow_html=True,
+                )
+            with top_right:
+                st.caption("Put OI %  ←  →  Call OI %  by strike")
+
+            tbl_col, dist_col = st.columns([1, 4])
+            with tbl_col:
+                tbl = components.oi_by_strike_table(
+                    chain, spot, strike_window=window, normalize=True
+                )
+                styled = (
+                    tbl.style
+                    .format({"strike": "${:,.0f}",
+                             "call_oi": "{:.1%}",
+                             "put_oi": "{:.1%}",
+                             "total": "{:.1%}"})
+                    .background_gradient(subset=["call_oi"], cmap="Greens", vmin=0)
+                    .background_gradient(subset=["put_oi"], cmap="Reds", vmin=0)
+                    .background_gradient(subset=["total"], cmap="Blues", vmin=0)
+                )
+                st.dataframe(styled, hide_index=True, width="stretch", height=560)
+            with dist_col:
+                st.plotly_chart(
+                    components.oi_distribution(chain, spot, strike_window=window),
+                    width="stretch",
+                )
         with tabs[9]:
             pct_grid = exposures.pct_oi_by_strike_expiry(chain)
             st.plotly_chart(
