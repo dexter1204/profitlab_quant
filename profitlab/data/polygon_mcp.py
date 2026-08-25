@@ -69,6 +69,28 @@ _KEYWORDS = {
 
 _resolved: dict[str, str] = {}
 _available_names: list[str] | None = None
+_tools_by_name: dict[str, dict] = {}
+
+
+def _tool_arg_names(tool_name: str) -> set[str]:
+    """Return the parameter names declared on `tool_name`'s inputSchema."""
+    tool = _tools_by_name.get(tool_name) or {}
+    schema = tool.get("inputSchema") or tool.get("input_schema") or {}
+    props = schema.get("properties") or {}
+    return set(props.keys())
+
+
+def _pick_arg_key(tool_name: str, candidates: list[str]) -> str | None:
+    """Given a list of candidate argument names, return the first one the
+    tool's schema declares. Falls back to the first candidate when the
+    schema is empty (some wrappers omit inputSchema)."""
+    declared = _tool_arg_names(tool_name)
+    if declared:
+        for c in candidates:
+            if c in declared:
+                return c
+        return None
+    return candidates[0] if candidates else None
 
 
 def _client() -> mcp_client.MCPClient:
@@ -77,18 +99,20 @@ def _client() -> mcp_client.MCPClient:
 
 def list_available_tools() -> list[dict]:
     """One-shot discovery — call from the sidebar to see what your
-    listing exposes. Also caches the tool names for the resolver."""
-    global _available_names
+    listing exposes. Also caches the tool names + schemas for the resolver."""
+    global _available_names, _tools_by_name
     tools = _client().list_tools()
     _available_names = [t.get("name", "") for t in tools if t.get("name")]
+    _tools_by_name = {t.get("name", ""): t for t in tools if t.get("name")}
     return tools
 
 
 def _refresh_available_names() -> list[str]:
-    global _available_names
+    global _available_names, _tools_by_name
     if _available_names is None:
-        _available_names = [t.get("name", "") for t in _client().list_tools()
-                            if t.get("name")]
+        tools = _client().list_tools()
+        _available_names = [t.get("name", "") for t in tools if t.get("name")]
+        _tools_by_name = {t.get("name", ""): t for t in tools if t.get("name")}
     return _available_names
 
 
@@ -129,9 +153,10 @@ def _resolve_tool(op: str) -> str:
 
 def clear_resolved_cache() -> None:
     """Force re-discovery on next call — useful if you switch env vars."""
-    global _resolved, _available_names
+    global _resolved, _available_names, _tools_by_name
     _resolved = {}
     _available_names = None
+    _tools_by_name = {}
 
 
 # ── endpoints (same signatures as data/yfinance.py, data/polygon.py) ──────
@@ -205,12 +230,30 @@ def option_chain(
     max_expiries: int = 4,
 ) -> pd.DataFrame:
     ticker = ticker.upper()
-    args = {"underlying_asset": ticker, "limit": 250}
-    if expiries:
-        args["expiration_date"] = ",".join(expiries)
-    payload = _client().call_tool(_resolve_tool("options_snapshot"), args)
+    tool = _resolve_tool("options_snapshot")
 
-    contracts = _dig(payload, ["results"]) or _dig(payload, ["snapshots"]) or []
+    # Underlying-ticker arg name varies by wrapper — pick the one this tool
+    # actually declares in its inputSchema.
+    underlying_key = _pick_arg_key(
+        tool,
+        ["underlyingAsset", "underlying_asset", "underlyingTicker",
+         "underlying_ticker", "ticker", "symbol", "asset"],
+    ) or "underlyingAsset"
+    args = {underlying_key: ticker, "limit": 250}
+    if expiries:
+        # Expiration arg name likewise varies.
+        exp_key = _pick_arg_key(
+            tool, ["expirationDate", "expiration_date", "expiration"],
+        ) or "expiration_date"
+        args[exp_key] = ",".join(expiries)
+
+    payload = _client().call_tool(tool, args)
+
+    contracts = (_dig(payload, ["results"])
+                 or _dig(payload, ["snapshots"])
+                 or _dig(payload, ["data"])
+                 or _dig(payload, ["contracts"])
+                 or [])
     if not contracts and isinstance(payload, list):
         contracts = payload
     rows = []
@@ -237,10 +280,21 @@ def option_chain(
             "last": float(day.get("close") or np.nan),
         })
     if not rows:
+        # Include enough context to diagnose: the tool name we called, the
+        # arg keys we used, and a preview of the raw payload shape so the
+        # user can see whether the call was accepted but empty, or the
+        # response is in a shape we didn't unpack.
+        import json as _json
+        preview = _json.dumps(payload, default=str)[:800]
+        arg_hint = ", ".join(f"{k}={v!r}" for k, v in args.items())
         raise RuntimeError(
-            f"polygon_mcp: empty options snapshot for {ticker!r}. "
-            "Some starter plans don't include options snapshots — check your api.market "
-            "listing entitlements or try list_available_tools() to see what's exposed."
+            f"polygon_mcp: empty options snapshot for {ticker!r}.\n"
+            f"  tool: {tool}\n"
+            f"  args: {arg_hint}\n"
+            f"  payload preview: {preview}\n"
+            f"If the payload has a 'results' array with contracts, share it and "
+            f"we'll wire up the missing field mapping. If the response is empty, "
+            f"your api.market plan may not include the options-chain snapshot."
         )
     df = pd.DataFrame(rows)
 
