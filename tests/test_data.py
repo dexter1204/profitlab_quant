@@ -81,21 +81,18 @@ def test_mcp_client_wraps_jsonrpc_body_and_headers():
 
     class FakeResponse:
         ok = True
-        text = ""
-        def json(self):
-            return {
-                "jsonrpc": "2.0", "id": 1,
-                "result": {"content": [{"type": "text",
-                                        "text": '{"ticker": {"min": {"c": 741.23}}}'}]},
-            }
+        text = ('{"jsonrpc":"2.0","id":1,"result":{"content":'
+                '[{"type":"text","text":"{\\"ticker\\":{\\"min\\":{\\"c\\":741.23}}}"}]}}')
+        headers = {"Content-Type": "application/json"}
 
     cli = mcp_client.MCPClient("https://x/mcp", "key123")
+    cli._initialized = True  # skip handshake for this unit test
 
     captured = {}
-    def fake_post(url, data, timeout):
+    def fake_post(url, data, headers=None, timeout=None):
         captured["url"] = url
         captured["body"] = data
-        captured["headers"] = cli._session.headers
+        captured["headers"] = dict(cli._session.headers)
         return FakeResponse()
 
     with patch.object(cli._session, "post", side_effect=fake_post):
@@ -110,6 +107,54 @@ def test_mcp_client_wraps_jsonrpc_body_and_headers():
     assert body["params"]["name"] == "get_snapshot_ticker"
     assert captured["headers"]["Authorization"] == "Bearer key123"
     assert captured["headers"]["x-api-key"] == "key123"
+
+
+def test_mcp_client_parses_sse_and_dual_accept_header():
+    """Streamable HTTP transport — server can return SSE or JSON. Client
+    must accept both and unwrap the SSE data: line."""
+    from profitlab.data import mcp_client
+
+    class SSEResponse:
+        ok = True
+        text = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_aggs"}]}}\n\n'
+        headers = {"Content-Type": "text/event-stream", "Mcp-Session-Id": "sess-abc"}
+
+    cli = mcp_client.MCPClient("https://x/mcp", "key123")
+    # Force initialized so list_tools() doesn't try the handshake first.
+    cli._initialized = True
+
+    with patch.object(cli._session, "post", return_value=SSEResponse()):
+        tools = cli.list_tools()
+
+    assert cli.session_headers()["Accept"] == "application/json, text/event-stream"
+    assert cli._session_id == "sess-abc"  # session id captured from response
+    assert [t["name"] for t in tools] == ["get_aggs"]
+
+
+def test_mcp_client_echoes_session_id_on_followup_requests():
+    from profitlab.data import mcp_client
+
+    class InitResponse:
+        ok = True
+        text = '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26"}}'
+        headers = {"Content-Type": "application/json", "Mcp-Session-Id": "sess-xyz"}
+
+    class ToolsResponse:
+        ok = True
+        text = '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
+        headers = {"Content-Type": "application/json"}
+
+    cli = mcp_client.MCPClient("https://x/mcp", "k")
+    calls: list = []
+    def fake_post(url, data, headers=None, timeout=None):
+        calls.append(dict(headers or {}))
+        return InitResponse() if len(calls) <= 2 else ToolsResponse()
+
+    with patch.object(cli._session, "post", side_effect=fake_post):
+        cli.list_tools()  # triggers initialize → notify → tools/list
+
+    # 3rd call (tools/list) must carry the Mcp-Session-Id header captured on init.
+    assert calls[-1].get("Mcp-Session-Id") == "sess-xyz"
 
 
 def test_polygon_mcp_dispatcher_registered():
