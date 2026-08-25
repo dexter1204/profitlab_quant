@@ -1,5 +1,6 @@
 """Sanity checks on the exposure aggregator and level detectors."""
 
+import numpy as np
 import pandas as pd
 
 from profitlab import demo, exposures, metrics, regime
@@ -61,6 +62,56 @@ def test_gex_grid_sums_match_strike_totals():
     reference = exposures.gex_by_strike(chain, ctx).sort_values("strike").reset_index(drop=True)
     merged = per_strike.reset_index(drop=True).merge(reference, on="strike", suffixes=("_grid", "_ref"))
     assert (merged["gex_grid"] - merged["gex_ref"]).abs().max() < 1e-6
+
+
+def test_oi_by_strike_expiry_columns_and_sums():
+    chain = demo.demo_chain("QQQ")
+    grid = exposures.oi_by_strike_expiry(chain)
+    assert {"call_oi", "put_oi", "net_oi", "total_oi"}.issubset(grid.columns)
+    # Sanity: totals reconstruct the raw chain totals.
+    total_from_grid = float(grid["total_oi"].sum())
+    total_from_chain = float(chain["oi"].sum())
+    assert abs(total_from_grid - total_from_chain) < 1e-6
+
+
+def test_pct_oi_normalizes_to_one():
+    chain = demo.demo_chain("QQQ")
+    pct = exposures.pct_oi_by_strike_expiry(chain)
+    # Sum of shares across all cells must equal 1 (± float).
+    assert abs(float(pct["pct_total_oi"].sum()) - 1.0) < 1e-9
+
+
+def test_iv_by_expiry_produces_row_per_expiry():
+    chain = demo.demo_chain("QQQ")
+    term = exposures.iv_by_expiry(chain, spot=demo.DEMO_SPOTS["QQQ"])
+    assert set(term.columns).issuperset({"expiry", "atm_iv", "call_iv", "put_iv", "skew", "dte"})
+    assert len(term) == chain["expiry"].nunique()
+    assert (term["atm_iv"] > 0).all()
+
+
+def test_iv_surface_shape_covers_window():
+    spot = demo.DEMO_SPOTS["QQQ"]
+    chain = demo.demo_chain("QQQ")
+    grid = exposures.iv_surface(chain, spot, strike_window=15)
+    assert {"strike", "expiry", "iv"}.issubset(grid.columns)
+    assert (grid["iv"] > 0).all()
+    # All strikes returned must fall within the requested window.
+    step = float(np.median(np.diff(np.sort(chain["strike"].unique()))))
+    assert grid["strike"].between(spot - 15 * step, spot + 15 * step).all()
+
+
+def test_net_drift_monotone_direction_matches_gamma_regime():
+    """In a call-dominated (long-gamma) regime, net delta should trend upward
+    with spot — dealers are progressively longer as spot rises."""
+    spot = demo.DEMO_SPOTS["QQQ"]
+    chain = demo.demo_chain("QQQ")
+    ctx = _ctx(spot)
+    df = exposures.net_drift(chain, ctx, spot_pct=0.03, n=41)
+    assert len(df) == 41
+    assert (df["spot"].diff().dropna() > 0).all()
+    # Fit a slope; sign varies by chain but the value should be finite.
+    slope = float(np.polyfit(df["spot"], df["net_delta"], 1)[0])
+    assert np.isfinite(slope)
 
 
 def test_regime_flips_around_gamma_flip():

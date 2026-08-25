@@ -111,8 +111,11 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
 
     left, right = st.columns([3, 1])
     with left:
-        tabs = st.tabs(["GEX + DEX", "Heat map GEX", "Heat map DEX",
-                        "Delta surface", "OI"])
+        tabs = st.tabs([
+            "GEX + DEX", "Heat map GEX", "Heat map DEX", "OI heat map",
+            "Net drift", "Delta surface", "Volatility drift",
+            "Volatility surface", "OI", "% OI",
+        ])
         with tabs[0]:
             st.plotly_chart(
                 components.gex_dex_pair(gex, dex, spot, levels, strike_window=window),
@@ -149,6 +152,29 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                     hide_index=True, width="stretch",
                 )
         with tabs[3]:
+            oi_grid = exposures.oi_by_strike_expiry(chain)
+            st.plotly_chart(
+                components.oi_heatmap(
+                    oi_grid, spot, levels=levels, strike_window=window,
+                    mode="net", asof=ctx.asof,
+                ),
+                width="stretch",
+            )
+            st.caption(
+                "Net OI = call OI − put OI. Green = call-heavy strikes "
+                "(potential ceilings). Red = put-heavy (potential floors)."
+            )
+        with tabs[4]:
+            drift = exposures.net_drift(chain, ctx, spot_pct=0.05, n=81)
+            st.plotly_chart(
+                components.net_drift_chart(drift, spot, levels),
+                width="stretch",
+            )
+            st.caption(
+                "Dealer net delta ($) as spot varies ±5%. Upward slope means "
+                "dealers must sell into rallies / buy into dips (long γ → dampens)."
+            )
+        with tabs[5]:
             atm_row = chain.iloc[(chain["strike"] - spot).abs().argsort()].head(1).iloc[0]
             atm_iv_val = float(atm_row["iv"]) if atm_row["iv"] > 0 else 0.22
             k = float(atm_row["strike"])
@@ -169,12 +195,38 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                 "Model: Black-Scholes · Axes: Spot Price × Time to Maturity · "
                 "IV taken from the ATM strike of the current chain."
             )
-        with tabs[4]:
+        with tabs[6]:
+            term = exposures.iv_by_expiry(chain, spot)
+            st.plotly_chart(components.vol_drift_chart(term), width="stretch")
+            st.caption(
+                "Top: ATM/call/put IV per expiry. Bottom: put−call skew "
+                "(positive = puts richer → hedging demand)."
+            )
+        with tabs[7]:
+            iv_grid = exposures.iv_surface(chain, spot, strike_window=window)
+            st.plotly_chart(
+                components.vol_surface(iv_grid, spot=spot, asof=ctx.asof),
+                width="stretch",
+            )
+            st.caption(
+                "Median IV per (strike × DTE) cell from the current chain."
+            )
+        with tabs[8]:
             by_strike = (
                 chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
                 .pivot(index="strike", columns="type", values="oi").fillna(0)
             )
             st.dataframe(by_strike, width="stretch")
+        with tabs[9]:
+            pct_grid = exposures.pct_oi_by_strike_expiry(chain)
+            st.plotly_chart(
+                components.oi_heatmap(
+                    pct_grid, spot, levels=levels, strike_window=window,
+                    mode="pct", asof=ctx.asof,
+                ),
+                width="stretch",
+            )
+            st.caption("Cell value = share of total open interest in the whole chain.")
 
     with right:
         prices = _load_prices(use_demo)

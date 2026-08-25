@@ -165,6 +165,96 @@ def delta_surface(
     return spot_axis, days_axis, np.asarray(grid, dtype=float)
 
 
+def oi_by_strike_expiry(chain: pd.DataFrame) -> pd.DataFrame:
+    """Long-form OI grid with a `net_oi` (call OI minus put OI) column
+    suitable for the OI heat map."""
+    df = chain.copy()
+    df["expiry"] = pd.to_datetime(df["expiry"])
+    signed = df.assign(
+        call_oi=np.where(df["type"].str.lower() == "call", df["oi"], 0.0),
+        put_oi=np.where(df["type"].str.lower() == "put", df["oi"], 0.0),
+    )
+    grouped = (
+        signed.groupby(["strike", "expiry"], as_index=False)
+        [["call_oi", "put_oi"]].sum()
+    )
+    grouped["net_oi"] = grouped["call_oi"] - grouped["put_oi"]
+    grouped["total_oi"] = grouped["call_oi"] + grouped["put_oi"]
+    return grouped.sort_values(["expiry", "strike"])
+
+
+def pct_oi_by_strike_expiry(chain: pd.DataFrame) -> pd.DataFrame:
+    """Share of total OI at each strike/expiry cell — for the "% OI" tab."""
+    grid = oi_by_strike_expiry(chain).copy()
+    total = float(grid["total_oi"].sum()) or 1.0
+    grid["pct_total_oi"] = grid["total_oi"] / total
+    grid["pct_net_oi"] = grid["net_oi"] / total
+    return grid
+
+
+def iv_by_expiry(chain: pd.DataFrame, spot: float, atm_window: int = 3) -> pd.DataFrame:
+    """ATM implied-vol per expiry (median IV over the `atm_window` strikes
+    nearest to spot) — powers the VOLATILITY DRIFT term-structure chart."""
+    df = chain.copy()
+    df["expiry"] = pd.to_datetime(df["expiry"])
+    out = []
+    for exp, sub in df.groupby("expiry"):
+        near = sub.iloc[(sub["strike"] - spot).abs().argsort()].head(atm_window * 2)
+        atm_iv = float(np.nanmedian(near["iv"]))
+        call_iv = float(np.nanmedian(near.loc[near["type"].str.lower() == "call", "iv"]))
+        put_iv = float(np.nanmedian(near.loc[near["type"].str.lower() == "put", "iv"]))
+        out.append({
+            "expiry": exp, "atm_iv": atm_iv,
+            "call_iv": call_iv, "put_iv": put_iv,
+            "skew": (put_iv - call_iv) if np.isfinite(put_iv - call_iv) else 0.0,
+        })
+    df_out = pd.DataFrame(out).sort_values("expiry")
+    df_out["dte"] = (df_out["expiry"] - df_out["expiry"].min()).dt.days
+    return df_out
+
+
+def iv_surface(chain: pd.DataFrame, spot: float,
+               strike_window: int = 20) -> pd.DataFrame:
+    """Wide grid of IV per (strike × expiry) — feeds the 3-D vol surface."""
+    df = chain.copy()
+    df["expiry"] = pd.to_datetime(df["expiry"])
+    strikes = np.sort(df["strike"].unique())
+    step = float(np.median(np.diff(strikes))) if len(strikes) > 1 else 1.0
+    lo, hi = spot - strike_window * step, spot + strike_window * step
+    df = df[(df["strike"] >= lo) & (df["strike"] <= hi)]
+    grid = (
+        df.groupby(["strike", "expiry"], as_index=False)["iv"].median()
+    )
+    return grid
+
+
+def net_drift(chain: pd.DataFrame, ctx: ChainContext,
+              spot_pct: float = 0.05, n: int = 61) -> pd.DataFrame:
+    """Dealer net-delta drift profile: total dealer delta if spot moved
+    from `spot*(1-spot_pct)` to `spot*(1+spot_pct)`. Slope tells you where
+    dealer hedging pressure amplifies (short-gamma) or dampens (long-gamma)
+    price moves."""
+    from . import greeks
+
+    spot_axis = np.linspace(ctx.spot * (1 - spot_pct), ctx.spot * (1 + spot_pct), n)
+    t = _time_to_expiry(chain["expiry"], ctx.asof)
+    kind = chain["type"].str.lower().to_numpy()
+    strike = chain["strike"].to_numpy(dtype=float)
+    iv = chain["iv"].to_numpy(dtype=float)
+    oi = chain["oi"].to_numpy(dtype=float)
+    is_call = kind == "call"
+
+    profile = np.empty(n, dtype=float)
+    for i, s in enumerate(spot_axis):
+        d_call = greeks.delta(s, strike, t, ctx.r, iv, ctx.q, "call")
+        d_put = greeks.delta(s, strike, t, ctx.r, iv, ctx.q, "put")
+        d = np.where(is_call, d_call, d_put)
+        sign = np.where(is_call, -1.0, 1.0)  # dealer short call / long put
+        contract_dollar_delta = sign * d * CONTRACT_MULT * s
+        profile[i] = float((contract_dollar_delta * oi).sum())
+    return pd.DataFrame({"spot": spot_axis, "net_delta": profile})
+
+
 def totals(chain: pd.DataFrame, ctx: ChainContext) -> dict:
     return {
         "gex": float(gex_by_strike(chain, ctx)["gex"].sum()),

@@ -464,6 +464,272 @@ def _statrow(label: str, value: str, cls: str = "") -> str:
     )
 
 
+# ── OI heat map (calls vs puts) ────────────────────────────────────────────
+def oi_heatmap(
+    long_df: pd.DataFrame,
+    spot: float,
+    levels: Optional[dict] = None,
+    strike_window: int = 20,
+    mode: str = "net",             # "net" | "pct" | "total"
+    asof: Optional[pd.Timestamp] = None,
+) -> go.Figure:
+    """Table-style OI heat map. `mode`:
+      - "net"   → net OI (call − put), calls green / puts red
+      - "pct"   → cell share of total OI (both signs)
+      - "total" → total OI, single-hue"""
+    levels = levels or {}
+    if long_df.empty:
+        return go.Figure()
+
+    strikes = np.sort(long_df["strike"].unique())
+    step = float(np.median(np.diff(strikes))) if len(strikes) > 1 else 1.0
+    lo, hi = spot - strike_window * step, spot + strike_window * step
+    df = long_df[(long_df["strike"] >= lo) & (long_df["strike"] <= hi)].copy()
+    if df.empty:
+        return go.Figure()
+
+    asof = asof or pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    df["expiry"] = pd.to_datetime(df["expiry"])
+    df["dte"] = (df["expiry"] - asof).dt.days.clip(lower=0)
+    df["dte_label"] = df["dte"].apply(lambda d: f"{d}D")
+    dte_order = df[["dte", "dte_label"]].drop_duplicates().sort_values("dte")["dte_label"].tolist()
+
+    if mode == "pct":
+        value_col, title, fmt = "pct_total_oi", "% OF TOTAL OI", "pct"
+    elif mode == "total":
+        value_col, title, fmt = "total_oi", "TOTAL OPEN INTEREST", "int"
+    else:
+        value_col, title, fmt = "net_oi", "NET OPEN INTEREST (CALLS − PUTS)", "int"
+
+    grid = (
+        df.pivot_table(index="strike", columns="dte_label", values=value_col, aggfunc="sum")
+        .reindex(columns=dte_order).sort_index(ascending=False)
+    )
+    z = grid.values
+    zmax = float(np.nanmax(np.abs(z)) or 1.0)
+
+    def _fmt(v):
+        if np.isnan(v):
+            return ""
+        if fmt == "pct":
+            return f"{v*100:.1f}%"
+        if fmt == "int":
+            return _fmt_millions(v).rstrip("M") if abs(v) >= 1e6 else f"{v:,.0f}"
+        return _fmt_millions(v)
+
+    text = np.array([[_fmt(v) for v in row] for row in z], dtype=object)
+
+    if mode == "total":
+        colorscale = [(0.0, "#0b1220"), (1.0, "#3b82f6")]
+        zmin, zmid = 0.0, None
+    else:
+        colorscale = [
+            (0.0, "#7f1d1d"), (0.30, "#ef4444"),
+            (0.48, "#0b1220"), (0.52, "#0b1220"),
+            (0.70, S.GREEN), (1.0, "#14532d"),
+        ]
+        zmin, zmid = -zmax, 0.0
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z, x=grid.columns.tolist(), y=grid.index.tolist(),
+        text=text, texttemplate="%{text}",
+        textfont=dict(color=S.TEXT_STRONG, size=11, family="Inter, system-ui"),
+        colorscale=colorscale, zmid=zmid, zmin=zmin, zmax=zmax,
+        xgap=2, ygap=2,
+        colorbar=dict(title=dict(text=title, font=dict(color=S.MUTED, size=10)),
+                      tickfont=dict(color=S.MUTED, size=9),
+                      outlinewidth=0, thickness=8, len=0.5),
+        hovertemplate=("strike=%{y:$,.0f}<br>dte=%{x}<br>value=%{z:,.0f}<extra></extra>"),
+    ))
+    row_h = 26
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=max(420, min(920, row_h * len(grid.index) + 100)),
+        margin=dict(l=64, r=48, t=48, b=24),
+        xaxis=dict(title="", side="top", showgrid=False, showline=False, ticks="",
+                   tickfont=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+        yaxis=dict(title="", autorange="reversed", tickformat="$,.0f",
+                   showgrid=False, showline=False, ticks="",
+                   tickfont=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+        title=dict(text=title, x=0.005, y=0.995, xanchor="left", yanchor="top",
+                   font=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+    )
+    # Spot row + wall/flip markers same as gamma heatmap
+    if len(grid.index) > 0:
+        closest = min(grid.index.tolist(), key=lambda s: abs(s - spot))
+        fig.add_shape(type="rect", xref="x", yref="y",
+                      x0=-0.5, x1=len(grid.columns) - 0.5,
+                      y0=closest - step / 2, y1=closest + step / 2,
+                      line=dict(color=S.YELLOW, width=1.5),
+                      fillcolor="rgba(250,204,21,0.06)", layer="above")
+        fig.add_annotation(xref="paper", yref="y",
+                           x=-0.01, y=closest, xanchor="right", yanchor="middle",
+                           text=f"<b>${closest:,.0f}</b> SPOT", showarrow=False,
+                           font=dict(color=S.YELLOW, size=10, family="Inter, system-ui"))
+    return fig
+
+
+# ── net delta drift curve ──────────────────────────────────────────────────
+def net_drift_chart(drift: pd.DataFrame, spot: float, levels: dict) -> go.Figure:
+    """Dealer net-delta profile across a spot band. Slope = hedging pressure:
+    upward = dampens (long γ), downward = amplifies (short γ)."""
+    x = drift["spot"].to_numpy()
+    y = drift["net_delta"].to_numpy()
+
+    fig = go.Figure()
+    # Zero baseline for reference
+    fig.add_hline(y=0, line=dict(color=S.BORDER, width=1))
+    # Fill between the curve and zero
+    fill_above = np.where(y > 0, y, 0)
+    fill_below = np.where(y < 0, y, 0)
+    fig.add_trace(go.Scatter(x=x, y=fill_above, mode="lines",
+                             line=dict(color=S.GREEN, width=0),
+                             fill="tozeroy", fillcolor="rgba(34,197,94,0.22)",
+                             hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=x, y=fill_below, mode="lines",
+                             line=dict(color=S.RED, width=0),
+                             fill="tozeroy", fillcolor="rgba(239,68,68,0.22)",
+                             hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines",
+        line=dict(color=S.TEXT_STRONG, width=2),
+        name="Net Δ$",
+        hovertemplate="spot=%{x:$,.2f}<br>net Δ$=%{y:,.0f}<extra></extra>",
+    ))
+    fig.add_vline(x=spot, line=dict(color=S.YELLOW, width=1, dash="dash"), opacity=0.7)
+    for k, color, label in (("gamma_flip", S.COLOR_GAMMA, "γ-FLIP"),
+                             ("call_wall", S.COLOR_CALL, "CW"),
+                             ("put_wall", S.COLOR_PUT, "PW")):
+        v = levels.get(k)
+        if v is None or not (x.min() <= v <= x.max()):
+            continue
+        fig.add_vline(x=v, line=dict(color=color, width=1, dash="dot"), opacity=0.7)
+        fig.add_annotation(x=v, y=y.max(), xanchor="left", yanchor="top",
+                           text=f"<b>{label}</b>", showarrow=False,
+                           font=dict(color=color, size=10, family="Inter, system-ui"))
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=560, margin=dict(l=48, r=48, t=40, b=40),
+        xaxis=dict(title="Spot Price ($)", tickformat="$,.2f",
+                   gridcolor=S.GRID, tickfont=dict(color=S.MUTED, size=10)),
+        yaxis=dict(title="Dealer Net Delta ($)", tickformat=".2s",
+                   gridcolor=S.GRID, tickfont=dict(color=S.MUTED, size=10)),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+        title=dict(text="NET DELTA DRIFT", x=0.005, y=0.99, xanchor="left",
+                   font=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+    )
+    return fig
+
+
+# ── volatility drift (term structure) ──────────────────────────────────────
+def vol_drift_chart(term: pd.DataFrame) -> go.Figure:
+    """IV vs DTE term-structure plot with call/put split and skew."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.72, 0.28], vertical_spacing=0.04)
+    fig.add_trace(go.Scatter(
+        x=term["dte"], y=term["atm_iv"] * 100, mode="lines+markers",
+        line=dict(color=S.YELLOW, width=2), marker=dict(size=7),
+        name="ATM IV",
+        hovertemplate="dte=%{x}<br>IV=%{y:.2f}%<extra></extra>",
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=term["dte"], y=term["call_iv"] * 100, mode="lines+markers",
+        line=dict(color=S.GREEN, width=1.5, dash="dot"),
+        marker=dict(size=5), name="Call IV",
+        hovertemplate="dte=%{x}<br>Call IV=%{y:.2f}%<extra></extra>",
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=term["dte"], y=term["put_iv"] * 100, mode="lines+markers",
+        line=dict(color=S.RED, width=1.5, dash="dot"),
+        marker=dict(size=5), name="Put IV",
+        hovertemplate="dte=%{x}<br>Put IV=%{y:.2f}%<extra></extra>",
+    ), row=1, col=1)
+    # Skew subplot (put IV − call IV)
+    fig.add_trace(go.Bar(
+        x=term["dte"], y=term["skew"] * 100,
+        marker=dict(color=np.where(term["skew"] >= 0, S.RED_SOFT, S.GREEN_SOFT),
+                    line=dict(width=0)),
+        name="Put−Call skew",
+        hovertemplate="dte=%{x}<br>skew=%{y:.2f}%<extra></extra>",
+    ), row=2, col=1)
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=560, margin=dict(l=48, r=48, t=40, b=40),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                    font=dict(color=S.MUTED, size=10)),
+        title=dict(text="VOLATILITY DRIFT (TERM STRUCTURE)", x=0.005, y=0.99, xanchor="left",
+                   font=dict(color=S.MUTED, size=11, family="Inter, system-ui")),
+    )
+    for r in (1, 2):
+        fig.update_xaxes(gridcolor=S.GRID, showline=False,
+                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
+        fig.update_yaxes(gridcolor=S.GRID, showline=False,
+                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
+    fig.update_yaxes(title="IV (%)", ticksuffix="%", row=1, col=1)
+    fig.update_yaxes(title="Skew (%)", ticksuffix="%", row=2, col=1)
+    fig.update_xaxes(title="Days to Expiry", row=2, col=1)
+    return fig
+
+
+# ── 3D volatility surface (strike × expiry × IV) ───────────────────────────
+def vol_surface(iv_grid: pd.DataFrame, spot: float, asof: pd.Timestamp) -> go.Figure:
+    """3D IV surface derived from the option chain."""
+    grid = iv_grid.copy()
+    grid["expiry"] = pd.to_datetime(grid["expiry"])
+    grid["dte"] = (grid["expiry"] - asof).dt.days.clip(lower=1)
+    wide = grid.pivot_table(index="dte", columns="strike", values="iv", aggfunc="median")
+    wide = wide.sort_index().sort_index(axis=1)
+    if wide.empty:
+        return go.Figure()
+    z = wide.values * 100  # %
+
+    fig = go.Figure(data=go.Surface(
+        x=wide.columns.tolist(), y=wide.index.tolist(), z=z,
+        colorscale="Turbo",
+        cmin=float(np.nanmin(z)), cmax=float(np.nanmax(z)),
+        colorbar=dict(title=dict(text="IV (%)", font=dict(color=S.MUTED)),
+                      tickfont=dict(color=S.MUTED, size=10),
+                      outlinewidth=0, thickness=10, len=0.6),
+        lighting=dict(ambient=0.55, diffuse=0.75, specular=0.15,
+                      roughness=0.55, fresnel=0.15),
+        hovertemplate="strike=$%{x:,.0f}<br>dte=%{y:.0f}<br>IV=%{z:.2f}%<extra></extra>",
+    ))
+
+    def _axis(title, **extra):
+        base = dict(gridcolor="rgba(148,163,184,0.18)", color=S.MUTED,
+                    showbackground=False,
+                    title=dict(text=title, font=dict(color=S.MUTED,
+                                                     family="Inter, system-ui")))
+        base.update(extra)
+        return base
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=680, margin=dict(l=0, r=0, t=30, b=0),
+        scene=dict(
+            xaxis=_axis("Strike ($)", tickprefix="$", tickformat=",.0f"),
+            yaxis=_axis("Days to Expiry"),
+            zaxis=_axis("IV (%)", ticksuffix="%"),
+            camera=dict(eye=dict(x=1.6, y=-1.6, z=1.0)),
+            aspectmode="cube",
+        ),
+        font=dict(color=S.TEXT, family="Inter, system-ui"),
+    )
+    fig.add_annotation(
+        x=0, y=1.02, xref="paper", yref="paper", xanchor="left", yanchor="bottom",
+        text=f"<b>IV SURFACE</b> · spot ${spot:,.2f}", showarrow=False,
+        font=dict(color=S.MUTED, size=11, family="Inter, system-ui"),
+    )
+    return fig
+
+
 # ── candlestick chart with option-level overlays ───────────────────────────
 _LEVEL_STYLE = {
     "call_wall":   (S.COLOR_CALL, "Call Wall"),
