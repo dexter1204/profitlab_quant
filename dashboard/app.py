@@ -125,9 +125,22 @@ def _sidebar_controls():
             try:
                 from profitlab.data import polygon_mcp
                 tools = polygon_mcp.list_available_tools()
+                names = [t.get("name", "?") for t in tools]
                 st.sidebar.success(f"Connected · {len(tools)} tools available")
+                required = {
+                    "options snapshot": any("snapshot" in n and "option" in n for n in names),
+                    "aggregates (bars)": any("aggs" in n or "aggregates" in n for n in names),
+                    "stock snapshot": any("snapshot" in n and ("ticker" in n or "stocks" in n) for n in names),
+                }
+                missing = [k for k, ok in required.items() if not ok]
+                if missing:
+                    st.sidebar.warning(
+                        "This listing is missing: " + ", ".join(missing) +
+                        ". The dashboard needs these — consider polygon.io direct "
+                        "or a richer api.market listing."
+                    )
                 with st.sidebar.expander("See tool names"):
-                    st.write([t.get("name", "?") for t in tools])
+                    st.write(names)
             except Exception as e:
                 st.sidebar.error(f"{e}")
 
@@ -157,8 +170,35 @@ def _sidebar_controls():
     return use_demo, window, positions, remote_logos
 
 
+def _vendor_data_error(err: Exception) -> None:
+    """Render a friendly banner when the current vendor can't serve the
+    data the dashboard needs (usually a limited api.market MCP listing
+    that lacks options-chain snapshots or aggregates)."""
+    vendor = data.vendor_name()
+    st.error(
+        f"**{vendor}** couldn't return the data this view needs.\n\n"
+        f"```\n{err}\n```"
+    )
+    st.info(
+        "Este listing / vendor no expone los endpoints que necesita el "
+        "dashboard (chain snapshot + aggregates). Opciones:\n\n"
+        "• **Reactivar demo data** en la sidebar (toggle arriba) — funciona "
+        "todo con mock determinista.\n"
+        "• Cambiar el **vendor** a `yfinance` (delayed pero gratis).\n"
+        "• Suscribirse a **Polygon.io directo** (Starter $29/mo incluye "
+        "options snapshots + aggregates) y elegir vendor `polygon`.\n"
+        "• Buscar un listing más completo en api.market — este solo tiene "
+        "28 tools (mayormente indicadores técnicos + daily open/close), "
+        "no snapshot de chain."
+    )
+
+
 def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -> None:
-    chain, spot = _load_chain(ticker, use_demo)
+    try:
+        chain, spot = _load_chain(ticker, use_demo)
+    except Exception as e:
+        _vendor_data_error(e)
+        return
     ctx = exposures.ChainContext(
         spot=spot, asof=pd.Timestamp.now("UTC").tz_localize(None).normalize()
     )
@@ -309,7 +349,13 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             st.caption("Cell value = share of total open interest in the whole chain.")
 
     with right:
-        prices = _load_prices(use_demo)
+        try:
+            prices = _load_prices(use_demo)
+        except Exception as e:
+            st.warning(
+                f"Price history unavailable from **{data.vendor_name()}**: {e}"
+            )
+            return
         atm_iv = float(chain.iloc[(chain["strike"] - spot).abs().argsort()].head(2)["iv"].mean())
         exps = sorted(chain["expiry"].unique())
         front_iv = float(chain[chain["expiry"] == exps[0]]["iv"].median()) if exps else None
@@ -327,6 +373,13 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
             components.beta_panel(portfolio)
         except KeyError as e:
             st.warning(f"Missing price data for {e}. Toggle demo data or extend `_load_prices`.")
+
+
+def _render_market_heatmap_safe(use_demo: bool, remote_logos: bool) -> None:
+    try:
+        _render_market_heatmap(use_demo, remote_logos)
+    except Exception as e:
+        _vendor_data_error(e)
 
 
 def _render_chart(ticker: str, use_demo: bool) -> None:
@@ -421,9 +474,12 @@ def main() -> None:
     if view == "Gamma & Flow":
         _render_gamma_flow(ticker, use_demo, window, positions_df)
     elif view == "Chart":
-        _render_chart(ticker, use_demo)
+        try:
+            _render_chart(ticker, use_demo)
+        except Exception as e:
+            _vendor_data_error(e)
     else:
-        _render_market_heatmap(use_demo, remote_logos)
+        _render_market_heatmap_safe(use_demo, remote_logos)
 
 
 if __name__ == "__main__":
