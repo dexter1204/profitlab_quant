@@ -36,12 +36,14 @@ def _vendor_module():
     name = os.environ.get("PROFITLAB_VENDOR", "yfinance").lower()
     if name in ("yf", "yfinance"):
         from . import yfinance as mod
-    elif name in ("polygon", "polygon.io", "api.market"):
+    elif name in ("polygon", "polygon.io"):
         from . import polygon as mod
+    elif name in ("polygon_mcp", "polygon-mcp", "api.market", "mcp"):
+        from . import polygon_mcp as mod
     else:
         raise ValueError(
             f"Unknown PROFITLAB_VENDOR={name!r}. "
-            "Set it to 'yfinance' or 'polygon'."
+            "Set it to 'yfinance', 'polygon', or 'polygon_mcp'."
         )
     return mod
 

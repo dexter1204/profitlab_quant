@@ -73,19 +73,22 @@ def _sidebar_controls():
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
 
     st.sidebar.subheader("Live data vendor")
+    vendor_options = ["yfinance", "polygon", "polygon_mcp"]
+    cur = os.environ.get("PROFITLAB_VENDOR", "yfinance")
     vendor = st.sidebar.selectbox(
         "Vendor",
-        options=["yfinance", "polygon"],
-        index=0 if os.environ.get("PROFITLAB_VENDOR", "yfinance") == "yfinance" else 1,
-        help="yfinance: retail delayed, no key. polygon: pro data, needs key.",
+        options=vendor_options,
+        index=vendor_options.index(cur) if cur in vendor_options else 0,
+        help="yfinance: retail delayed, no key. polygon: pro REST. "
+             "polygon_mcp: api.market MCP gateway (recommended for api.market users).",
         disabled=use_demo,
     )
     os.environ["PROFITLAB_VENDOR"] = vendor
+
     if vendor == "polygon":
         key = st.sidebar.text_input(
             "POLYGON_API_KEY",
-            value=os.environ.get("POLYGON_API_KEY", ""),
-            type="password",
+            value=os.environ.get("POLYGON_API_KEY", ""), type="password",
             help="Session-only. Set POLYGON_API_KEY env var to persist.",
             disabled=use_demo,
         )
@@ -94,11 +97,39 @@ def _sidebar_controls():
         base = st.sidebar.text_input(
             "POLYGON_BASE_URL",
             value=os.environ.get("POLYGON_BASE_URL", "https://api.polygon.io"),
-            help="Use https://api.market/api/v1/service/polygon.io/polygon for the api.market gateway.",
             disabled=use_demo,
         )
         if base:
             os.environ["POLYGON_BASE_URL"] = base.strip()
+
+    if vendor == "polygon_mcp":
+        mcp_url = st.sidebar.text_input(
+            "POLYGON_MCP_URL",
+            value=os.environ.get(
+                "POLYGON_MCP_URL",
+                "https://prod.api.market/api/mcp/polygon.io/polygon",
+            ),
+            disabled=use_demo,
+        )
+        if mcp_url:
+            os.environ["POLYGON_MCP_URL"] = mcp_url.strip()
+        mcp_key = st.sidebar.text_input(
+            "POLYGON_MCP_KEY",
+            value=os.environ.get("POLYGON_MCP_KEY", ""), type="password",
+            disabled=use_demo,
+        )
+        if mcp_key:
+            os.environ["POLYGON_MCP_KEY"] = mcp_key.strip()
+
+        if not use_demo and st.sidebar.button("🔍 Test MCP connection"):
+            try:
+                from profitlab.data import polygon_mcp
+                tools = polygon_mcp.list_available_tools()
+                st.sidebar.success(f"Connected · {len(tools)} tools available")
+                with st.sidebar.expander("See tool names"):
+                    st.write([t.get("name", "?") for t in tools])
+            except Exception as e:
+                st.sidebar.error(f"{e}")
 
     window = st.sidebar.slider("Strike window (steps)", 5, 40, 20)
     st.sidebar.markdown("---")

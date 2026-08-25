@@ -74,6 +74,69 @@ def test_polygon_normalizes_option_chain_snapshot():
     assert df["iv"].between(0.2, 0.3).all()
 
 
+def test_mcp_client_wraps_jsonrpc_body_and_headers():
+    """RPC call must send Bearer + x-api-key headers, JSON-RPC 2.0 body,
+    and unwrap MCP's content envelope back to a Python object."""
+    from profitlab.data import mcp_client
+
+    class FakeResponse:
+        ok = True
+        text = ""
+        def json(self):
+            return {
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"content": [{"type": "text",
+                                        "text": '{"ticker": {"min": {"c": 741.23}}}'}]},
+            }
+
+    cli = mcp_client.MCPClient("https://x/mcp", "key123")
+
+    captured = {}
+    def fake_post(url, data, timeout):
+        captured["url"] = url
+        captured["body"] = data
+        captured["headers"] = cli._session.headers
+        return FakeResponse()
+
+    with patch.object(cli._session, "post", side_effect=fake_post):
+        out = cli.call_tool("get_snapshot_ticker", {"ticker": "QQQ"})
+
+    assert out == {"ticker": {"min": {"c": 741.23}}}
+    assert captured["url"] == "https://x/mcp"
+    import json
+    body = json.loads(captured["body"])
+    assert body["jsonrpc"] == "2.0"
+    assert body["method"] == "tools/call"
+    assert body["params"]["name"] == "get_snapshot_ticker"
+    assert captured["headers"]["Authorization"] == "Bearer key123"
+    assert captured["headers"]["x-api-key"] == "key123"
+
+
+def test_polygon_mcp_dispatcher_registered():
+    """The dispatcher must resolve `polygon_mcp` to the mcp adapter."""
+    with patch.dict(os.environ, {"PROFITLAB_VENDOR": "polygon_mcp"}):
+        assert data.vendor_name() == "polygon_mcp"
+
+
+def test_polygon_mcp_spot_extracts_price_from_snapshot_shape():
+    """The adapter must find a price whether it's under min.c, day.c, or prevDay.c."""
+    from profitlab.data import polygon_mcp
+
+    for shape in (
+        {"ticker": {"min": {"c": 500.10}}},
+        {"ticker": {"day": {"c": 500.20}}},
+        {"ticker": {"prevDay": {"c": 500.30}}},
+        {"results": [{"min": {"c": 500.40}}]},
+    ):
+        with patch.dict(os.environ,
+                        {"POLYGON_MCP_URL": "https://x/mcp",
+                         "POLYGON_MCP_KEY": "test"}):
+            with patch.object(polygon_mcp, "_client") as fake_client:
+                fake_client.return_value.call_tool.return_value = shape
+                px = polygon_mcp.spot("QQQ")
+        assert 500.0 < px < 501.0
+
+
 def test_polygon_intraday_bars_normalizes_aggs():
     from profitlab.data import polygon as polygon_mod
 
