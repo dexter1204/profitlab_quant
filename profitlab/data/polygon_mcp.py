@@ -33,38 +33,55 @@ from . import mcp_client
 # wrappers of Polygon rename tools inconsistently; we auto-discover by
 # calling tools/list once and picking the first candidate that exists.
 # You can force a specific name with the matching POLYGON_MCP_TOOL_* env var.
+# api.market names tools by flattening the Polygon REST URL path to
+# snake_case, e.g. GET /v3/snapshot/options/{underlyingAsset}
+#                → get_v3_snapshot_options_underlyingasset
+# Polygon's official MCP uses friendlier names, and other wrappers vary.
+# We list both styles per operation so the resolver matches whichever
+# lives on the current gateway.
 _CANDIDATES = {
     "spot": [
         os.environ.get("POLYGON_MCP_TOOL_SPOT", ""),
+        "get_v2_snapshot_locale_us_markets_stocks_tickers_stocksticker",
         "get_snapshot_ticker",
         "get_snapshot_all",
         "snapshot_ticker",
         "get_last_trade",
         "last_trade",
-        "get_previous_close_agg",
     ],
     "aggs": [
         os.environ.get("POLYGON_MCP_TOOL_AGGS", ""),
+        "get_v2_aggs_ticker_stocksticker_range_multiplier_timespan_from_to",
         "get_aggs",
         "list_aggs",
         "aggregates",
-        "get_aggregate_bars",
     ],
     "options_snapshot": [
         os.environ.get("POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT", ""),
+        # api.market URL-path style — the chain snapshot endpoint
+        "get_v3_snapshot_options_underlyingasset",
+        "get_v3_snapshot_options_underlyingAsset",
+        # Polygon official MCP naming
         "list_snapshot_options_chain",
         "get_snapshot_option_chain",
+        # Other wrappers
         "options_snapshot_chain",
         "snapshot_options",
         "get_options_chain_snapshot",
-        "list_options_contracts",
     ],
 }
 
+# Must-have + must-not-have tokens for keyword-based fallback.
 _KEYWORDS = {
-    "spot":              ("snapshot", "ticker"),
-    "aggs":              ("agg",),
-    "options_snapshot":  ("option", "snapshot"),
+    "spot":              {"require": ("snapshot",), "any": ("ticker", "tickers"),
+                          "reject": ("options", "aggregates", "trades", "quotes",
+                                     "open_close", "list", "contract")},
+    "aggs":              {"require": ("aggs",), "any": (),
+                          "reject": ("options", "grouped", "previous")},
+    "options_snapshot":  {"require": ("snapshot", "option"), "any": (),
+                          "reject": ("contract_", "open_close", "unified",
+                                     "aggregates", "trades", "quotes",
+                                     "reference", "previous")},
 }
 
 _resolved: dict[str, str] = {}
@@ -117,37 +134,51 @@ def _refresh_available_names() -> list[str]:
 
 
 def _resolve_tool(op: str) -> str:
-    """Return the actual tool name for `op` on the current server. Tries
-    the configured candidates first, then keyword matching (all → any)
-    against the server's tools/list output."""
+    """Return the actual tool name for `op` on the current server.
+    Priority: exact candidate → keyword match with reject list → fail
+    with a full list of what's available."""
     if op in _resolved:
         return _resolved[op]
 
     names = _refresh_available_names()
     name_set = set(names)
-    # 1) Configured / hardcoded candidates.
+
+    # 1) Configured / hardcoded candidates — first exact match wins.
     for cand in _CANDIDATES.get(op, []):
         if cand and cand in name_set:
             _resolved[op] = cand
             return cand
-    # 2) Keyword match — first pass requires ALL tokens, second pass ANY.
-    kws = _KEYWORDS.get(op, ())
-    for require_all in (True, False):
-        for name in sorted(name_set):
-            low = name.lower()
-            hits = [k for k in kws if k in low]
-            if (require_all and len(hits) == len(kws) and kws) or \
-               (not require_all and hits):
-                _resolved[op] = name
-                return name
+
+    # 2) Keyword match — require ALL required tokens, none of the rejected
+    #    ones, and any of the "any" tokens (if provided).
+    kws = _KEYWORDS.get(op, {})
+    require = kws.get("require", ())
+    any_of = kws.get("any", ())
+    reject = kws.get("reject", ())
+
+    def _fits(name: str) -> bool:
+        low = name.lower()
+        if require and not all(k in low for k in require):
+            return False
+        if reject and any(k in low for k in reject):
+            return False
+        if any_of and not any(k in low for k in any_of):
+            return False
+        return True
+
+    matches = sorted(n for n in name_set if _fits(n))
+    if matches:
+        picked = matches[0]
+        _resolved[op] = picked
+        return picked
 
     raise RuntimeError(
-        f"polygon_mcp: could not resolve a tool for {op!r}. "
-        f"Server exposes {len(names)} tools; tried candidates "
-        f"{[c for c in _CANDIDATES.get(op, []) if c]}. "
-        f"Set POLYGON_MCP_TOOL_{op.upper()} to the correct name.\n"
-        f"Available tools on this gateway:\n  - "
-        + "\n  - ".join(sorted(names))
+        f"polygon_mcp: could not resolve a tool for {op!r}.\n"
+        f"  tried candidates: {[c for c in _CANDIDATES.get(op, []) if c]}\n"
+        f"  keyword rules: {kws}\n"
+        f"  Set POLYGON_MCP_TOOL_{op.upper()} to the correct name.\n"
+        f"  Available tools on this gateway ({len(names)}):\n    - "
+        + "\n    - ".join(sorted(names))
     )
 
 
