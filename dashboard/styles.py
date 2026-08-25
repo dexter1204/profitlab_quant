@@ -51,8 +51,29 @@ _CSS = f"""
 }}
 
 /* Kill Streamlit chrome we don't want */
-#MainMenu, footer, header {{ visibility: hidden; }}
+#MainMenu, footer {{ visibility: hidden; }}
 [data-testid="stDecoration"] {{ display: none; }}
+/* Keep the top header transparent (no bar) but keep its buttons — the sidebar
+   collapse/expand arrow lives there. Hiding `header` outright makes the
+   sidebar impossible to reopen once it collapses. */
+header[data-testid="stHeader"] {{
+    background: transparent !important;
+    height: auto !important;
+}}
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"] {{
+    visibility: visible !important;
+    display: flex !important;
+    z-index: 1000;
+}}
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapsedControl"] button {{
+    background: {BG_ELEVATED} !important;
+    border: 1px solid {BORDER} !important;
+    color: {TEXT_STRONG} !important;
+    border-radius: 6px;
+}}
 
 /* Full-bleed dark background */
 .stApp {{
