@@ -176,10 +176,38 @@ def test_polygon_mcp_spot_extracts_price_from_snapshot_shape():
         with patch.dict(os.environ,
                         {"POLYGON_MCP_URL": "https://x/mcp",
                          "POLYGON_MCP_KEY": "test"}):
-            with patch.object(polygon_mcp, "_client") as fake_client:
+            polygon_mcp.clear_resolved_cache()
+            with patch.object(polygon_mcp, "_client") as fake_client, \
+                 patch.object(polygon_mcp, "_resolve_tool", return_value="get_snapshot_ticker"):
                 fake_client.return_value.call_tool.return_value = shape
                 px = polygon_mcp.spot("QQQ")
         assert 500.0 < px < 501.0
+
+
+def test_resolve_tool_picks_from_candidates_and_falls_back_to_keywords():
+    from profitlab.data import polygon_mcp
+
+    # First: a candidate is present as-is
+    polygon_mcp.clear_resolved_cache()
+    with patch.object(polygon_mcp, "_refresh_available_names",
+                      return_value=["get_snapshot_ticker", "get_aggs",
+                                    "list_snapshot_options_chain"]):
+        assert polygon_mcp._resolve_tool("options_snapshot") == "list_snapshot_options_chain"
+
+    # Second: candidate list has no match → keyword fallback finds it by tokens
+    polygon_mcp.clear_resolved_cache()
+    with patch.object(polygon_mcp, "_refresh_available_names",
+                      return_value=["fetch_option_chain_snapshot",  # not in _CANDIDATES
+                                    "get_aggs", "get_snapshot_ticker"]):
+        picked = polygon_mcp._resolve_tool("options_snapshot")
+        assert "option" in picked.lower() and "snapshot" in picked.lower()
+
+    # Third: nothing matches → informative error
+    polygon_mcp.clear_resolved_cache()
+    with patch.object(polygon_mcp, "_refresh_available_names",
+                      return_value=["unrelated_tool"]):
+        with pytest.raises(RuntimeError, match="could not resolve"):
+            polygon_mcp._resolve_tool("options_snapshot")
 
 
 def test_polygon_intraday_bars_normalizes_aggs():

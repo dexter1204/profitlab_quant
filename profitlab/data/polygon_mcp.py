@@ -28,12 +28,47 @@ import pandas as pd
 from . import mcp_client
 
 
-# ── configurable tool names ────────────────────────────────────────────────
-_TOOL_SPOT = os.environ.get("POLYGON_MCP_TOOL_SPOT", "get_snapshot_ticker")
-_TOOL_AGGS = os.environ.get("POLYGON_MCP_TOOL_AGGS", "get_aggs")
-_TOOL_OPTIONS_SNAPSHOT = os.environ.get(
-    "POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT", "list_snapshot_options_chain"
-)
+# ── tool-name resolution ───────────────────────────────────────────────────
+# Candidate names per operation, tried in order. api.market and other MCP
+# wrappers of Polygon rename tools inconsistently; we auto-discover by
+# calling tools/list once and picking the first candidate that exists.
+# You can force a specific name with the matching POLYGON_MCP_TOOL_* env var.
+_CANDIDATES = {
+    "spot": [
+        os.environ.get("POLYGON_MCP_TOOL_SPOT", ""),
+        "get_snapshot_ticker",
+        "get_snapshot_all",
+        "snapshot_ticker",
+        "get_last_trade",
+        "last_trade",
+        "get_previous_close_agg",
+    ],
+    "aggs": [
+        os.environ.get("POLYGON_MCP_TOOL_AGGS", ""),
+        "get_aggs",
+        "list_aggs",
+        "aggregates",
+        "get_aggregate_bars",
+    ],
+    "options_snapshot": [
+        os.environ.get("POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT", ""),
+        "list_snapshot_options_chain",
+        "get_snapshot_option_chain",
+        "options_snapshot_chain",
+        "snapshot_options",
+        "get_options_chain_snapshot",
+        "list_options_contracts",
+    ],
+}
+
+_KEYWORDS = {
+    "spot":              ("snapshot", "ticker"),
+    "aggs":              ("agg",),
+    "options_snapshot":  ("option", "snapshot"),
+}
+
+_resolved: dict[str, str] = {}
+_available_names: list[str] | None = None
 
 
 def _client() -> mcp_client.MCPClient:
@@ -42,15 +77,65 @@ def _client() -> mcp_client.MCPClient:
 
 def list_available_tools() -> list[dict]:
     """One-shot discovery — call from the sidebar to see what your
-    api.market listing exposes so you can pin the right tool names."""
-    return _client().list_tools()
+    listing exposes. Also caches the tool names for the resolver."""
+    global _available_names
+    tools = _client().list_tools()
+    _available_names = [t.get("name", "") for t in tools if t.get("name")]
+    return tools
+
+
+def _refresh_available_names() -> list[str]:
+    global _available_names
+    if _available_names is None:
+        _available_names = [t.get("name", "") for t in _client().list_tools()
+                            if t.get("name")]
+    return _available_names
+
+
+def _resolve_tool(op: str) -> str:
+    """Return the actual tool name for `op` on the current server. Tries
+    the configured candidates first, then falls back to keyword matching
+    against the server's tools/list output."""
+    if op in _resolved:
+        return _resolved[op]
+
+    names = set(_refresh_available_names())
+    # 1) Configured / hardcoded candidates.
+    for cand in _CANDIDATES.get(op, []):
+        if cand and cand in names:
+            _resolved[op] = cand
+            return cand
+    # 2) Keyword-match fallback — pick any tool whose name contains all
+    # the keywords for this op.
+    kws = _KEYWORDS.get(op, ())
+    for name in sorted(names):
+        low = name.lower()
+        if all(k in low for k in kws):
+            _resolved[op] = name
+            return name
+
+    raise RuntimeError(
+        f"polygon_mcp: could not resolve a tool for {op!r}. "
+        f"Server exposes {len(names)} tools; tried "
+        f"{[c for c in _CANDIDATES.get(op, []) if c]}. "
+        f"Set POLYGON_MCP_TOOL_{op.upper()} to the correct name — "
+        f"run list_available_tools() to inspect."
+    )
+
+
+def clear_resolved_cache() -> None:
+    """Force re-discovery on next call — useful if you switch env vars."""
+    global _resolved, _available_names
+    _resolved = {}
+    _available_names = None
 
 
 # ── endpoints (same signatures as data/yfinance.py, data/polygon.py) ──────
 def spot(ticker: str) -> float:
     ticker = ticker.upper()
     cli = _client()
-    payload = cli.call_tool(_TOOL_SPOT, {"ticker": ticker, "market_type": "stocks"})
+    tool = _resolve_tool("spot")
+    payload = cli.call_tool(tool, {"ticker": ticker, "market_type": "stocks"})
     # Response shape varies by MCP wrapper — try the common paths.
     px = _dig(payload, ["ticker", "min", "c"]) \
          or _dig(payload, ["ticker", "day", "c"]) \
@@ -71,7 +156,7 @@ def price_history(ticker: str, period: str = "1y", interval: str = "1d") -> pd.S
     end = datetime.utcnow().date()
     start = end - timedelta(days=span)
     mult, timespan = _interval_to_polygon(interval)
-    payload = _client().call_tool(_TOOL_AGGS, {
+    payload = _client().call_tool(_resolve_tool("aggs"), {
         "ticker": ticker, "multiplier": mult, "timespan": timespan,
         "from_": start.isoformat(), "to": end.isoformat(),
         "adjusted": True, "sort": "asc", "limit": 50000,
@@ -92,7 +177,7 @@ def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.D
     end = datetime.utcnow().date()
     start = end - timedelta(days=max(span, 1))
     mult, timespan = _interval_to_polygon(interval)
-    payload = _client().call_tool(_TOOL_AGGS, {
+    payload = _client().call_tool(_resolve_tool("aggs"), {
         "ticker": ticker, "multiplier": mult, "timespan": timespan,
         "from_": start.isoformat(), "to": end.isoformat(),
         "adjusted": True, "sort": "asc", "limit": 50000,
@@ -119,7 +204,7 @@ def option_chain(
     args = {"underlying_asset": ticker, "limit": 250}
     if expiries:
         args["expiration_date"] = ",".join(expiries)
-    payload = _client().call_tool(_TOOL_OPTIONS_SNAPSHOT, args)
+    payload = _client().call_tool(_resolve_tool("options_snapshot"), args)
 
     contracts = _dig(payload, ["results"]) or _dig(payload, ["snapshots"]) or []
     if not contracts and isinstance(payload, list):
