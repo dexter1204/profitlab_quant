@@ -229,16 +229,7 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
                 tbl = components.oi_by_strike_table(
                     chain, spot, strike_window=window, normalize=True
                 )
-                styled = (
-                    tbl.style
-                    .format({"strike": "${:,.0f}",
-                             "call_oi": "{:.1%}",
-                             "put_oi": "{:.1%}",
-                             "total": "{:.1%}"})
-                    .background_gradient(subset=["call_oi"], cmap="Greens", vmin=0)
-                    .background_gradient(subset=["put_oi"], cmap="Reds", vmin=0)
-                    .background_gradient(subset=["total"], cmap="Blues", vmin=0)
-                )
+                styled = components.style_oi_table(tbl, spot)
                 st.dataframe(styled, hide_index=True, width="stretch", height=560)
             with dist_col:
                 st.plotly_chart(

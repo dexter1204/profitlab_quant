@@ -839,6 +839,46 @@ def oi_distribution(
     return fig
 
 
+def _rgba(hex_color: str, alpha: float) -> str:
+    r, g, b = _hex_to_rgb(hex_color)
+    return f"rgba({r},{g},{b},{max(0.0, min(1.0, alpha)):.3f})"
+
+
+def style_oi_table(tbl: pd.DataFrame, spot: float):
+    """pandas Styler for the OI table — per-cell background alpha
+    proportional to magnitude, no matplotlib required."""
+    call_max = float(tbl["call_oi"].max() or 1.0)
+    put_max = float(tbl["put_oi"].max() or 1.0)
+    total_max = float(tbl["total"].max() or 1.0)
+
+    def _bg(col: str, base_hex: str, vmax: float):
+        def apply_col(series):
+            return [f"background-color: {_rgba(base_hex, 0.85 * float(v) / vmax)}"
+                    if float(v) > 0 else "" for v in series]
+        return apply_col
+
+    def _highlight_spot_row(row):
+        # Highlight the row whose strike is closest to spot with a subtle
+        # yellow tint on the whole row.
+        closest = tbl.iloc[(tbl["strike"] - spot).abs().argsort()].iloc[0]["strike"]
+        if row["strike"] == closest:
+            return ["background-color: rgba(250,204,21,0.10); "
+                    "border-top: 1px solid #facc15; border-bottom: 1px solid #facc15"] * len(row)
+        return [""] * len(row)
+
+    return (
+        tbl.style
+        .format({"strike": "${:,.0f}",
+                 "call_oi": "{:.1%}",
+                 "put_oi": "{:.1%}",
+                 "total": "{:.1%}"})
+        .apply(_bg("call_oi", "#22c55e", call_max), subset=["call_oi"])
+        .apply(_bg("put_oi",  "#ef4444", put_max), subset=["put_oi"])
+        .apply(_bg("total",   "#3b82f6", total_max), subset=["total"])
+        .apply(_highlight_spot_row, axis=1)
+    )
+
+
 def oi_by_strike_table(chain: pd.DataFrame, spot: float,
                        strike_window: int = 30, normalize: bool = True) -> pd.DataFrame:
     """Display-ready OI table: STRIKE | CALL OI | PUT OI | TOTAL, sorted
