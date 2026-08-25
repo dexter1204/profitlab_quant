@@ -94,32 +94,36 @@ def _refresh_available_names() -> list[str]:
 
 def _resolve_tool(op: str) -> str:
     """Return the actual tool name for `op` on the current server. Tries
-    the configured candidates first, then falls back to keyword matching
+    the configured candidates first, then keyword matching (all → any)
     against the server's tools/list output."""
     if op in _resolved:
         return _resolved[op]
 
-    names = set(_refresh_available_names())
+    names = _refresh_available_names()
+    name_set = set(names)
     # 1) Configured / hardcoded candidates.
     for cand in _CANDIDATES.get(op, []):
-        if cand and cand in names:
+        if cand and cand in name_set:
             _resolved[op] = cand
             return cand
-    # 2) Keyword-match fallback — pick any tool whose name contains all
-    # the keywords for this op.
+    # 2) Keyword match — first pass requires ALL tokens, second pass ANY.
     kws = _KEYWORDS.get(op, ())
-    for name in sorted(names):
-        low = name.lower()
-        if all(k in low for k in kws):
-            _resolved[op] = name
-            return name
+    for require_all in (True, False):
+        for name in sorted(name_set):
+            low = name.lower()
+            hits = [k for k in kws if k in low]
+            if (require_all and len(hits) == len(kws) and kws) or \
+               (not require_all and hits):
+                _resolved[op] = name
+                return name
 
     raise RuntimeError(
         f"polygon_mcp: could not resolve a tool for {op!r}. "
-        f"Server exposes {len(names)} tools; tried "
+        f"Server exposes {len(names)} tools; tried candidates "
         f"{[c for c in _CANDIDATES.get(op, []) if c]}. "
-        f"Set POLYGON_MCP_TOOL_{op.upper()} to the correct name — "
-        f"run list_available_tools() to inspect."
+        f"Set POLYGON_MCP_TOOL_{op.upper()} to the correct name.\n"
+        f"Available tools on this gateway:\n  - "
+        + "\n  - ".join(sorted(names))
     )
 
 
