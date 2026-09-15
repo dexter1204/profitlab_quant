@@ -80,15 +80,22 @@ def _zero_crossing(
     return float(x0 - y0 * (x1 - x0) / (y1 - y0))
 
 
-def call_wall(gex: pd.DataFrame, spot: float) -> Optional[float]:
-    """Largest positive-GEX strike at or above spot."""
-    above = gex[(gex["strike"] >= spot) & (gex["gex"] > 0)]
+def call_wall(gex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional[float]:
+    """Largest positive-GEX strike within [spot, spot*(1+band_pct)]."""
+    hi = spot * (1 + band_pct)
+    above = gex[(gex["strike"] >= spot) & (gex["strike"] <= hi) & (gex["gex"] > 0)]
+    if above.empty:
+        # Fall back to any positive-GEX strike at or above spot.
+        above = gex[(gex["strike"] >= spot) & (gex["gex"] > 0)]
     return _peak_strike(above, "gex")
 
 
-def put_wall(gex: pd.DataFrame, spot: float) -> Optional[float]:
-    """Largest negative-GEX strike at or below spot (magnitude)."""
-    below = gex[(gex["strike"] <= spot) & (gex["gex"] < 0)].copy()
+def put_wall(gex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional[float]:
+    """Largest negative-GEX strike within [spot*(1-band_pct), spot]."""
+    lo = spot * (1 - band_pct)
+    below = gex[(gex["strike"] <= spot) & (gex["strike"] >= lo) & (gex["gex"] < 0)].copy()
+    if below.empty:
+        below = gex[(gex["strike"] <= spot) & (gex["gex"] < 0)].copy()
     if below.empty:
         return None
     below["mag"] = below["gex"].abs()
@@ -103,22 +110,38 @@ def delta_flip(dex: pd.DataFrame, spot: Optional[float] = None) -> Optional[floa
     return _zero_crossing(dex, "dex", spot=spot)
 
 
-def delta_wall(dex: pd.DataFrame, spot: float) -> Optional[float]:
-    """Largest positive-delta strike above spot — resistance from dealer hedge flow."""
-    above = dex[(dex["strike"] >= spot) & (dex["dex"] > 0)]
-    return _peak_strike(above, "dex")
+def delta_wall(dex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional[float]:
+    """Largest positive-delta strike within ±band around spot."""
+    lo, hi = spot * (1 - band_pct), spot * (1 + band_pct)
+    window = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi) & (dex["dex"] > 0)]
+    if window.empty:
+        window = dex[(dex["strike"] >= spot) & (dex["dex"] > 0)]
+    return _peak_strike(window, "dex")
 
 
-def major_neg_delta(dex: pd.DataFrame, spot: float) -> Optional[float]:
-    """Largest negative-delta strike; either side of spot."""
-    return _trough_strike(dex, "dex")
+def major_neg_delta(dex: pd.DataFrame, spot: float,
+                    band_pct: float = 0.10) -> Optional[float]:
+    """Largest negative-delta strike within ±band around spot."""
+    lo, hi = spot * (1 - band_pct), spot * (1 + band_pct)
+    window = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi) & (dex["dex"] < 0)]
+    if window.empty:
+        window = dex[dex["dex"] < 0]
+    return _trough_strike(window, "dex")
 
 
-def max_pain(chain: pd.DataFrame) -> Optional[float]:
-    """Strike that minimizes total intrinsic option value across all OI."""
+def max_pain(chain: pd.DataFrame, spot: Optional[float] = None,
+             band_pct: float = 0.15) -> Optional[float]:
+    """Strike within `band_pct` of spot that minimizes total intrinsic
+    option value across all OI. Restricted so deep-OTM strikes with
+    lopsided OI can't hijack the result."""
     if chain.empty:
         return None
     strikes = np.sort(chain["strike"].unique())
+    if spot is not None:
+        lo, hi = spot * (1 - band_pct), spot * (1 + band_pct)
+        band = strikes[(strikes >= lo) & (strikes <= hi)]
+        if len(band):
+            strikes = band
     call_mask = chain["type"].str.lower() == "call"
     calls = chain[call_mask]
     puts = chain[~call_mask]
@@ -147,5 +170,5 @@ def key_levels(
         delta_flip=delta_flip(dex, spot=spot),
         delta_wall=delta_wall(dex, spot),
         major_neg_delta=major_neg_delta(dex, spot),
-        max_pain=max_pain(chain),
+        max_pain=max_pain(chain, spot=spot),
     )

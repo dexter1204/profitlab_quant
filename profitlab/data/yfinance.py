@@ -73,7 +73,7 @@ def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.D
 def option_chain(
     ticker: str,
     expiries: Optional[list[str]] = None,
-    max_expiries: int = 4,
+    max_expiries: int = 8,
 ) -> pd.DataFrame:
     yf = _yf()
     tk = yf.Ticker(ticker)
@@ -105,6 +105,10 @@ def option_chain(
         "ask": raw.get("ask", np.nan).astype(float),
         "last": raw.get("lastPrice", np.nan).astype(float),
     })
-    out.loc[(out["iv"] <= 0.01) | (out["iv"] > 5.0), "iv"] = np.nan
-    out["iv"] = out["iv"].fillna(out["iv"].median())
+    # Tighter IV clip: yfinance frequently emits IVs near zero at deep-OTM
+    # strikes (data holes) which blow up gamma / second-order greeks.
+    out.loc[(out["iv"] < 0.05) | (out["iv"] > 3.0), "iv"] = np.nan
+    out["iv"] = out["iv"].fillna(out["iv"].median() if out["iv"].notna().any() else 0.22)
+    # Drop rows with zero OI — they contribute nothing but noise to sums.
+    out = out[out["oi"] > 0].reset_index(drop=True)
     return out

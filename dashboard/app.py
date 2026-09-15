@@ -370,7 +370,8 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
         front_iv = float(chain[chain["expiry"] == exps[0]]["iv"].median()) if exps else None
         back_iv = float(chain[chain["expiry"] == exps[-1]]["iv"].median()) if len(exps) > 1 else None
         iv_snap = iv.snapshot(atm_iv, prices[ticker], front_iv=front_iv, back_iv=back_iv)
-        reg = regime.classify(spot, levels.get("gamma_flip"))
+        reg = regime.classify(spot, levels.get("gamma_flip"),
+                              total_gex=totals.get("gex"))
         components.regime_panel(reg, iv_snap, ticker, spot)
 
     st.markdown("---")
