@@ -60,6 +60,22 @@ def price_history(ticker, period="1y", interval="1d"):
     return _vendor_module().price_history(ticker, period=period, interval=interval)
 
 
+def price_history_batch(tickers, period="1y"):
+    """Batch loader. Falls back to sequential price_history calls for
+    vendors that don't implement it natively."""
+    mod = _vendor_module()
+    fn = getattr(mod, "price_history_batch", None)
+    if fn is not None:
+        return fn(tickers, period=period)
+    out = {}
+    for t in tickers:
+        try:
+            out[t] = mod.price_history(t, period=period, interval="1d")
+        except Exception:
+            continue
+    return out
+
+
 def intraday_bars(ticker, interval="1m", period="1d"):
     return _vendor_module().intraday_bars(ticker, interval=interval, period=period)
 

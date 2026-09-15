@@ -25,6 +25,31 @@ def price_history(ticker: str, period: str = "1y", interval: str = "1d") -> pd.S
     return df["Close"].rename(ticker)
 
 
+def price_history_batch(tickers: list[str], period: str = "1y") -> dict[str, pd.Series]:
+    """Fetch many tickers in one request. ~5-10× faster than looping
+    price_history when we need N series (portfolio beta, market
+    heatmap). Silently drops tickers yfinance can't serve (e.g. NQ)."""
+    yf = _yf()
+    if not tickers:
+        return {}
+    df = yf.download(
+        " ".join(tickers), period=period, interval="1d",
+        group_by="ticker", auto_adjust=True, progress=False, threads=True,
+    )
+    out: dict[str, pd.Series] = {}
+    for tk in tickers:
+        try:
+            if len(tickers) == 1:
+                series = df["Close"].dropna()
+            else:
+                series = df[tk]["Close"].dropna()
+            if not series.empty:
+                out[tk] = series.rename(tk)
+        except (KeyError, TypeError):
+            continue
+    return out
+
+
 def spot(ticker: str) -> float:
     return float(price_history(ticker, period="5d").iloc[-1])
 

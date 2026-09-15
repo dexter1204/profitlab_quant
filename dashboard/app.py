@@ -83,11 +83,11 @@ def _load_chain(ticker: str, use_demo: bool) -> tuple[pd.DataFrame, float]:
     return data.option_chain(ticker), data.spot(ticker)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner="Fetching price history…")
 def _load_prices(use_demo: bool) -> dict[str, pd.Series]:
     if use_demo:
         return demo.demo_prices()
-    return {t: data.price_history(t, period="1y") for t in TICKERS + ["SPY"]}
+    return data.price_history_batch(TICKERS + ["SPY"], period="1y")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
