@@ -56,9 +56,22 @@ _CSS = f"""
 /* Keep the top header transparent (no bar) but keep its buttons — the sidebar
    collapse/expand arrow lives there. Hiding `header` outright makes the
    sidebar impossible to reopen once it collapses. */
+/* The Streamlit header sits above main content. When the sidebar
+   collapses it expands and — being position:sticky over the layout —
+   swallows every click that would land on the ticker/view pill row
+   just underneath. Kill its pointer surface entirely and re-enable
+   only on interactive descendants (buttons/links). */
 header[data-testid="stHeader"] {{
     background: transparent !important;
-    height: auto !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+}}
+header[data-testid="stHeader"] button,
+header[data-testid="stHeader"] a,
+header[data-testid="stHeader"] [role="button"] {{
+    pointer-events: auto !important;
 }}
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapseButton"],
