@@ -438,6 +438,26 @@ def _render_chart(ticker: str, use_demo: bool) -> None:
             fit_to_price=fit_to_price,
         ),
         width="stretch",
+        config={
+            # TradingView-style interactivity:
+            #   • scroll wheel zooms the chart under the cursor
+            #   • drag the y-axis to compress/expand the price scale
+            #   • drag the x-axis to compress/expand the time scale
+            #   • double-click resets both axes
+            "scrollZoom": True,
+            "displaylogo": False,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": [
+                "select2d", "lasso2d", "toggleSpikelines",
+            ],
+            "modeBarButtonsToAdd": [
+                "drawline", "drawopenpath", "eraseshape",
+            ],
+        },
+    )
+    st.caption(
+        "Scroll = zoom · drag chart = pan · drag y-axis = stretch price · "
+        "drag x-axis = stretch time · double-click = reset."
     )
     cap_bits = [
         f"Long γ" if levels.get("gamma_flip") and spot > levels["gamma_flip"] else "Short γ"

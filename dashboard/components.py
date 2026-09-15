@@ -1124,20 +1124,25 @@ def price_chart(
         hovermode="x unified",
         dragmode="pan",
     )
+    # Interactive axes — drag on the axis strips to compress/expand
+    # each dimension (TradingView-style price / time scaling).
     fig.update_xaxes(gridcolor=S.GRID, showline=False,
-                     tickfont=dict(color=S.MUTED, size=10), row=1, col=1)
+                     tickfont=dict(color=S.MUTED, size=10),
+                     fixedrange=False, row=1, col=1)
     fig.update_xaxes(gridcolor=S.GRID, showline=False,
-                     tickfont=dict(color=S.MUTED, size=10), row=2, col=1)
+                     tickfont=dict(color=S.MUTED, size=10),
+                     fixedrange=False, row=2, col=1)
     fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat="$,.2f",
                      tickfont=dict(color=S.MUTED, size=10),
-                     side="right", row=1, col=1)
-    # Lock y range to price band so candles get full vertical space.
+                     side="right", fixedrange=False, row=1, col=1)
+    # Initial y range from price band; user can drag to change it.
     if y_lo is not None:
         fig.update_yaxes(range=[y_lo, y_hi], row=1, col=1)
     fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat=".2s",
-                     tickfont=dict(color=S.MUTED, size=10), row=2, col=1)
+                     tickfont=dict(color=S.MUTED, size=10),
+                     fixedrange=False, row=2, col=1)
     fig.update_yaxes(showgrid=False, showticklabels=False,
-                     row=1, col=2)
+                     fixedrange=True, row=1, col=2)
     return fig
 
 
