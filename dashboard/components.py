@@ -1126,21 +1126,38 @@ def price_chart(
     )
     # Interactive axes — drag on the axis strips to compress/expand
     # each dimension (TradingView-style price / time scaling).
-    fig.update_xaxes(gridcolor=S.GRID, showline=False,
-                     tickfont=dict(color=S.MUTED, size=10),
-                     fixedrange=False, row=1, col=1)
+    fig.update_xaxes(
+        gridcolor=S.GRID, tickfont=dict(color=S.MUTED, size=10),
+        fixedrange=False,
+        showline=True, linewidth=1, linecolor=S.BORDER,
+        ticks="outside", ticklen=5, tickcolor=S.BORDER,
+        showspikes=True, spikecolor="rgba(250,204,21,0.5)",
+        spikethickness=1, spikedash="dot", spikemode="across",
+        row=1, col=1,
+    )
     fig.update_xaxes(gridcolor=S.GRID, showline=False,
                      tickfont=dict(color=S.MUTED, size=10),
                      fixedrange=False, row=2, col=1)
-    fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat="$,.2f",
-                     tickfont=dict(color=S.MUTED, size=10),
-                     side="right", fixedrange=False, row=1, col=1)
-    # Initial y range from price band; user can drag to change it.
+    # Price y-axis: put it on the LEFT with a visible line + wide tick
+    # padding so the drag-to-scale strip is a big obvious target
+    # (previous position between candle and GEX profile was too narrow
+    # to grab).
+    fig.update_yaxes(
+        gridcolor=S.GRID, tickformat="$,.2f",
+        tickfont=dict(color=S.TEXT, size=11, family="Inter, system-ui"),
+        side="left", fixedrange=False,
+        showline=True, linewidth=1, linecolor=S.BORDER,
+        ticks="outside", ticklen=6, tickcolor=S.BORDER,
+        showspikes=True, spikecolor="rgba(250,204,21,0.5)",
+        spikethickness=1, spikedash="dot", spikemode="across",
+        automargin=True,
+        row=1, col=1,
+    )
     if y_lo is not None:
         fig.update_yaxes(range=[y_lo, y_hi], row=1, col=1)
     fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat=".2s",
                      tickfont=dict(color=S.MUTED, size=10),
-                     fixedrange=False, row=2, col=1)
+                     side="left", fixedrange=False, row=2, col=1)
     fig.update_yaxes(showgrid=False, showticklabels=False,
                      fixedrange=True, row=1, col=2)
     return fig
