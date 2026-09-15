@@ -350,7 +350,9 @@ section[data-testid="stSidebar"] {{
 .pl-title .badge.demo {{ background: rgba(251,191,36,0.15); color: {AMBER}; border: 1px solid {AMBER}; }}
 .pl-title .badge.live {{ background: rgba(34,197,94,0.15); color: {GREEN}; border: 1px solid {GREEN}; }}
 
-/* Top-level pill radios (ticker row + view row) */
+/* Top-level pill radios (ticker row + view row).
+   Style with visibility/opacity — NEVER display:none on the radio input
+   or its wrapper, or the label's click-to-toggle stops working. */
 [data-testid="stRadio"] > label {{ display: none; }}
 [data-testid="stRadio"] div[role="radiogroup"] {{
     gap: 4px;
@@ -358,6 +360,8 @@ section[data-testid="stSidebar"] {{
     border-bottom: 1px solid {BORDER};
     margin-bottom: 6px;
     flex-wrap: wrap;
+    position: relative;
+    z-index: 5;
 }}
 [data-testid="stRadio"] div[role="radiogroup"] label {{
     background: transparent !important;
@@ -365,6 +369,14 @@ section[data-testid="stSidebar"] {{
     padding: 6px 14px;
     border-radius: 6px;
     cursor: pointer;
+    display: inline-flex !important;
+    align-items: center;
+    user-select: none;
+    position: relative;
+    z-index: 5;
+}}
+[data-testid="stRadio"] div[role="radiogroup"] label:hover {{
+    background: rgba(31,41,55,0.5) !important;
 }}
 [data-testid="stRadio"] div[role="radiogroup"] label p {{
     color: {MUTED} !important;
@@ -373,6 +385,7 @@ section[data-testid="stSidebar"] {{
     text-transform: uppercase;
     font-weight: 700;
     margin: 0 !important;
+    pointer-events: none;  /* clicks fall through to the label */
 }}
 [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {{
     background: {BG_ELEVATED} !important;
@@ -381,8 +394,17 @@ section[data-testid="stSidebar"] {{
 [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) p {{
     color: {TEXT_STRONG} !important;
 }}
-/* Hide the radio circles */
-[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child {{ display: none; }}
+/* Hide the radio circle marker visually, but keep it in the layout so
+   the wrapping <label> still activates the input on click. */
+[data-testid="stRadio"] div[role="radiogroup"] label > div:first-child {{
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden;
+    opacity: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none;
+}}
 
 /* DataFrame polish */
 [data-testid="stDataFrame"] {{
