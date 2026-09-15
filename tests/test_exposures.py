@@ -100,6 +100,35 @@ def test_iv_surface_shape_covers_window():
     assert grid["strike"].between(spot - 15 * step, spot + 15 * step).all()
 
 
+def test_net_drift_vectorized_matches_reference():
+    """The vectorized net_drift must produce the same profile a naive
+    Python-loop implementation would — same spot axis and same net_delta
+    values within float tolerance."""
+    from profitlab import greeks
+    spot = demo.DEMO_SPOTS["QQQ"]
+    chain = demo.demo_chain("QQQ")
+    ctx = _ctx(spot)
+    df_fast = exposures.net_drift(chain, ctx, spot_pct=0.03, n=21)
+
+    # Reference: naive loop, one spot at a time.
+    from profitlab.exposures import _time_to_expiry, CONTRACT_MULT
+    spot_axis = np.linspace(spot * 0.97, spot * 1.03, 21)
+    t = _time_to_expiry(chain["expiry"], ctx.asof)
+    kind = chain["type"].str.lower().to_numpy()
+    is_call = kind == "call"
+    strike = chain["strike"].to_numpy(dtype=float)
+    iv = chain["iv"].to_numpy(dtype=float)
+    oi = chain["oi"].to_numpy(dtype=float)
+    ref = []
+    for s in spot_axis:
+        d_call = greeks.delta(s, strike, t, ctx.r, iv, ctx.q, "call")
+        d_put = greeks.delta(s, strike, t, ctx.r, iv, ctx.q, "put")
+        d = np.where(is_call, d_call, d_put)
+        sign = np.where(is_call, -1.0, 1.0)
+        ref.append(float((sign * d * CONTRACT_MULT * s * oi).sum()))
+    assert np.allclose(df_fast["net_delta"].to_numpy(), np.array(ref), rtol=1e-9, atol=1e-3)
+
+
 def test_net_drift_monotone_direction_matches_gamma_regime():
     """In a call-dominated (long-gamma) regime, net delta should trend upward
     with spot — dealers are progressively longer as spot rises."""

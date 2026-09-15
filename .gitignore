@@ -1,4 +1,5 @@
 .streamlit/secrets.toml
+profitlab/_credentials.py
 __pycache__/
 *.pyc
 *.pyo

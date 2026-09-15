@@ -158,15 +158,30 @@ class MCPClient:
             return text
 
 
+_CACHED_CLIENT: MCPClient | None = None
+_CACHED_KEY: tuple[str, str] | None = None
+
+
 def from_env() -> MCPClient:
-    """Build a client from POLYGON_MCP_URL + POLYGON_MCP_KEY env vars."""
+    """Build (or reuse) a client from POLYGON_MCP_URL + POLYGON_MCP_KEY.
+
+    The client is cached at module scope keyed by (url, key), so repeated
+    Streamlit reruns reuse the same requests.Session (HTTP keep-alive)
+    and the same MCP session id — no repeated `initialize` handshake.
+    Rebuilds when the credentials change.
+    """
+    global _CACHED_CLIENT, _CACHED_KEY
     url = os.environ.get("POLYGON_MCP_URL", "").strip()
     key = os.environ.get("POLYGON_MCP_KEY", "").strip()
     if not url or not key:
         raise RuntimeError(
             "POLYGON_MCP_URL and POLYGON_MCP_KEY must be set before using "
-            "the polygon_mcp vendor. Example values from api.market:\n"
-            "  POLYGON_MCP_URL=https://prod.api.market/api/mcp/polygon.io/polygon\n"
-            "  POLYGON_MCP_KEY=<the API key api.market issued for the listing>"
+            "the polygon_mcp vendor. Set them in profitlab/_credentials.py "
+            "(local, git-ignored) or export them as env vars."
         )
-    return MCPClient(url, key)
+    creds = (url, key)
+    if _CACHED_CLIENT is not None and _CACHED_KEY == creds:
+        return _CACHED_CLIENT
+    _CACHED_CLIENT = MCPClient(url, key)
+    _CACHED_KEY = creds
+    return _CACHED_CLIENT

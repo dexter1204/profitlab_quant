@@ -15,24 +15,42 @@ import sys
 from pathlib import Path
 
 
+_CRED_KEYS = (
+    "PROFITLAB_VENDOR",
+    "POLYGON_API_KEY", "POLYGON_BASE_URL",
+    "POLYGON_MCP_URL", "POLYGON_MCP_KEY",
+    "POLYGON_MCP_TOOL_SPOT", "POLYGON_MCP_TOOL_AGGS",
+    "POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT",
+)
+
+
 def _load_secrets_into_env() -> None:
-    """When running on Streamlit Community Cloud, [App settings → Secrets]
-    populates st.secrets. Copy those into os.environ so the vendor
-    dispatcher and MCP client (which read env vars) pick them up
-    without the user having to paste keys into the sidebar."""
+    """Populate os.environ from — in this precedence order:
+      1. Actual OS env vars (highest — untouched here)
+      2. Streamlit Cloud secrets (.streamlit/secrets.toml)
+      3. profitlab/_credentials.py CREDENTIALS dict (local hardcoded)
+
+    The vendor dispatcher and MCP client both read env vars, so any
+    field populated here is picked up transparently — no sidebar entry
+    required.
+    """
+    # 2. Streamlit Cloud secrets
     try:
         import streamlit as _st
-        for key in (
-            "PROFITLAB_VENDOR",
-            "POLYGON_API_KEY", "POLYGON_BASE_URL",
-            "POLYGON_MCP_URL", "POLYGON_MCP_KEY",
-            "POLYGON_MCP_TOOL_SPOT", "POLYGON_MCP_TOOL_AGGS",
-            "POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT",
-        ):
+        for key in _CRED_KEYS:
             if key in _st.secrets and _st.secrets[key]:
                 os.environ.setdefault(key, str(_st.secrets[key]))
     except Exception:
-        pass  # no secrets file → nothing to do
+        pass
+
+    # 3. Local credentials file
+    try:
+        from profitlab import _credentials  # type: ignore
+        for key, val in getattr(_credentials, "CREDENTIALS", {}).items():
+            if val and key in _CRED_KEYS:
+                os.environ.setdefault(key, str(val))
+    except ImportError:
+        pass
 
 import pandas as pd
 import streamlit as st
@@ -93,56 +111,26 @@ def _sidebar_controls():
     st.sidebar.header("Controls")
     use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
 
+    # Vendor + credentials are read-only at runtime — configured either in
+    # profitlab/_credentials.py (local, git-ignored) or via env vars.
+    vendor = os.environ.get("PROFITLAB_VENDOR", "yfinance").lower()
     st.sidebar.subheader("Live data vendor")
-    vendor_options = ["yfinance", "polygon", "polygon_mcp"]
-    cur = os.environ.get("PROFITLAB_VENDOR", "yfinance")
-    vendor = st.sidebar.selectbox(
-        "Vendor",
-        options=vendor_options,
-        index=vendor_options.index(cur) if cur in vendor_options else 0,
-        help="yfinance: retail delayed, no key. polygon: pro REST. "
-             "polygon_mcp: api.market MCP gateway (recommended for api.market users).",
-        disabled=use_demo,
+    st.sidebar.markdown(
+        f"<div style='padding:8px 12px;border:1px solid #1f2937;border-radius:6px;"
+        f"background:#0b1220'>"
+        f"<div style='color:#64748b;font-size:10px;letter-spacing:0.14em;"
+        f"text-transform:uppercase;font-weight:700'>Vendor</div>"
+        f"<div style='color:#f8fafc;font-size:14px;font-weight:600'>{vendor}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
-    os.environ["PROFITLAB_VENDOR"] = vendor
+    st.sidebar.caption(
+        "Change vendor / keys in `profitlab/_credentials.py` "
+        "(copy from `_credentials.example.py`)."
+    )
 
-    if vendor == "polygon":
-        key = st.sidebar.text_input(
-            "POLYGON_API_KEY",
-            value=os.environ.get("POLYGON_API_KEY", ""), type="password",
-            help="Session-only. Set POLYGON_API_KEY env var to persist.",
-            disabled=use_demo,
-        )
-        if key:
-            os.environ["POLYGON_API_KEY"] = key
-        base = st.sidebar.text_input(
-            "POLYGON_BASE_URL",
-            value=os.environ.get("POLYGON_BASE_URL", "https://api.polygon.io"),
-            disabled=use_demo,
-        )
-        if base:
-            os.environ["POLYGON_BASE_URL"] = base.strip()
-
-    if vendor == "polygon_mcp":
-        mcp_url = st.sidebar.text_input(
-            "POLYGON_MCP_URL",
-            value=os.environ.get(
-                "POLYGON_MCP_URL",
-                "https://prod.api.market/api/mcp/polygon.io/polygon",
-            ),
-            disabled=use_demo,
-        )
-        if mcp_url:
-            os.environ["POLYGON_MCP_URL"] = mcp_url.strip()
-        mcp_key = st.sidebar.text_input(
-            "POLYGON_MCP_KEY",
-            value=os.environ.get("POLYGON_MCP_KEY", ""), type="password",
-            disabled=use_demo,
-        )
-        if mcp_key:
-            os.environ["POLYGON_MCP_KEY"] = mcp_key.strip()
-
-        if not use_demo and st.sidebar.button("🔍 Test MCP connection"):
+    if vendor == "polygon_mcp" and not use_demo:
+        if st.sidebar.button("🔍 Test MCP connection"):
             try:
                 from profitlab.data import polygon_mcp
                 tools = polygon_mcp.list_available_tools()
