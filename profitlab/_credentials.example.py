@@ -14,7 +14,10 @@ Only set the ones you use — leave the rest as empty strings.
 """
 
 CREDENTIALS: dict[str, str] = {
-    "PROFITLAB_VENDOR": "polygon_mcp",
+    # Default is yfinance so an unedited copy of this file still runs the
+    # app end-to-end (delayed retail data, no key needed). Change to
+    # "polygon" or "polygon_mcp" when you fill in the corresponding keys.
+    "PROFITLAB_VENDOR": "yfinance",
 
     # polygon.io direct — Starter plan or higher
     "POLYGON_API_KEY": "",
