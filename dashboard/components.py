@@ -910,15 +910,42 @@ def oi_by_strike_table(chain: pd.DataFrame, spot: float,
     return view
 
 
-# ── candlestick chart with option-level overlays ───────────────────────────
+# ── candlestick chart with option-level overlays + GEX profile ─────────────
 _LEVEL_STYLE = {
-    "call_wall":   (S.COLOR_CALL, "Call Wall"),
-    "put_wall":    (S.COLOR_PUT, "Put Wall"),
-    "gamma_flip":  (S.COLOR_GAMMA, "Gamma Flip"),
-    "delta_flip":  (S.COLOR_DELTA, "Delta Flip"),
-    "delta_wall":  (S.COLOR_DELTA, "Delta Wall"),
-    "max_pain":    (S.COLOR_MAX_PAIN, "Max Pain"),
+    "call_wall":       (S.COLOR_CALL, "Call Wall"),
+    "put_wall":        (S.COLOR_PUT, "Put Wall"),
+    "gamma_flip":      (S.COLOR_GAMMA, "Gamma Flip"),
+    "delta_flip":      (S.COLOR_DELTA, "Delta Flip"),
+    "delta_wall":      (S.COLOR_DELTA, "Delta Wall"),
+    "major_neg_delta": (S.COLOR_DELTA, "Major -Δ"),
+    "max_pain":        (S.COLOR_MAX_PAIN, "Max Pain"),
 }
+
+
+def _merge_coincident_levels(levels: dict, spot: float,
+                             tolerance: float = 0.0015) -> list[dict]:
+    """Group levels that fall within `tolerance` of each other (as a
+    fraction of spot) into one annotated band. Returns list of
+    {price, labels[], colors[]} for downstream rendering."""
+    items = []
+    for key, val in levels.items():
+        if val is None or not np.isfinite(val) or key not in _LEVEL_STYLE:
+            continue
+        color, label = _LEVEL_STYLE[key]
+        items.append((float(val), color, label))
+    items.sort(key=lambda t: t[0])
+
+    groups: list[dict] = []
+    for price, color, label in items:
+        if groups and abs(price - groups[-1]["price"]) / max(spot, 1) < tolerance:
+            groups[-1]["labels"].append(label)
+            groups[-1]["colors"].append(color)
+            # Average prices in the group (keeps the band centered).
+            n = len(groups[-1]["labels"])
+            groups[-1]["price"] = (groups[-1]["price"] * (n - 1) + price) / n
+        else:
+            groups.append({"price": price, "labels": [label], "colors": [color]})
+    return groups
 
 
 def price_chart(
@@ -928,29 +955,42 @@ def price_chart(
     ticker: str,
     *,
     show_levels: Optional[list[str]] = None,
-    band_pct: float = 0.0006,  # half-thickness of the colored band around a level
-    show_bands: bool = True,
+    band_pct: float = 0.0012,  # half-thickness of the colored band per level
+    gex_profile: Optional[pd.DataFrame] = None,
+    strike_window: int = 20,
 ) -> go.Figure:
-    """Candlestick chart + volume subplot with gamma/delta level overlays."""
+    """Candlestick chart + volume + right-side GEX profile with level
+    bands and merged left-side labels. Matches the reference layout."""
     show_levels = show_levels or list(_LEVEL_STYLE.keys())
+    active_levels = {k: v for k, v in levels.items() if k in show_levels}
 
+    # 2×2 grid: candle top-left, GEX profile top-right, volume bottom spanning
     fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
-        row_heights=[0.78, 0.22], vertical_spacing=0.02,
+        rows=2, cols=2,
+        shared_yaxes=True,
+        column_widths=[0.86, 0.14],
+        row_heights=[0.78, 0.22],
+        horizontal_spacing=0.005,
+        vertical_spacing=0.02,
+        specs=[
+            [{"type": "candlestick"}, {"type": "bar"}],
+            [{"type": "bar", "colspan": 2}, None],
+        ],
     )
+
+    # ── Candlestick ────────────────────────────────────────────────────
     fig.add_trace(
         go.Candlestick(
             x=bars["ts"], open=bars["open"], high=bars["high"],
             low=bars["low"], close=bars["close"],
             increasing_line_color=S.GREEN_SOFT, decreasing_line_color=S.RED_SOFT,
             increasing_fillcolor=S.GREEN_SOFT, decreasing_fillcolor=S.RED_SOFT,
-            line=dict(width=1),
-            showlegend=False,
-            name=ticker,
+            line=dict(width=1), showlegend=False, name=ticker,
         ),
         row=1, col=1,
     )
-    # Volume bars — colored by candle direction
+
+    # ── Volume ─────────────────────────────────────────────────────────
     up = bars["close"] >= bars["open"]
     vol_colors = np.where(up, S.GREEN_SOFT, S.RED_SOFT)
     fig.add_trace(
@@ -963,56 +1003,103 @@ def price_chart(
         row=2, col=1,
     )
 
-    # Level overlays
-    for key in show_levels:
-        v = levels.get(key)
-        if v is None or not np.isfinite(v):
-            continue
-        color, label = _LEVEL_STYLE[key]
-        if show_bands:
-            band = v * band_pct
-            fig.add_hrect(
-                y0=v - band, y1=v + band,
-                fillcolor=color, opacity=0.18,
-                line_width=0, row=1, col=1,
+    # ── Right side: GEX profile per strike ─────────────────────────────
+    if gex_profile is not None and not gex_profile.empty:
+        step = float(gex_profile["strike"].diff().dropna().median()) if len(gex_profile) > 1 else 1.0
+        lo, hi = spot - strike_window * step, spot + strike_window * step
+        prof = gex_profile[(gex_profile["strike"] >= lo) &
+                           (gex_profile["strike"] <= hi)].sort_values("strike")
+        if not prof.empty:
+            colors = [S.COLOR_CALL if v >= 0 else S.COLOR_MAX_PAIN
+                      for v in prof["gex"]]
+            # Value labels — abbreviated $XM / $XK
+            text_labels = [_fmt_millions(v) for v in prof["gex"]]
+            fig.add_trace(
+                go.Bar(
+                    x=prof["gex"], y=prof["strike"], orientation="h",
+                    marker=dict(color=colors, opacity=0.75,
+                                line=dict(width=0)),
+                    text=text_labels, textposition="outside",
+                    textfont=dict(color=S.MUTED, size=9, family="Inter, system-ui"),
+                    showlegend=False, name="GEX",
+                    hovertemplate="strike=%{y:$,.0f}<br>gex=%{x:$,.0f}<extra></extra>",
+                ),
+                row=1, col=2,
             )
+            fig.update_xaxes(showgrid=False, showticklabels=False,
+                             showline=False, zeroline=False, row=1, col=2)
+
+    # ── Level bands + merged labels ────────────────────────────────────
+    for group in _merge_coincident_levels(active_levels, spot):
+        v = group["price"]
+        band = v * band_pct * len(group["labels"])  # thicker if merged
+        # Blend colors within a merged group by picking the most-relevant
+        # (highest-priority: gamma, then call/put, then delta, then pain)
+        priority = ["Gamma Flip", "Call Wall", "Put Wall", "Delta Flip",
+                    "Delta Wall", "Major -Δ", "Max Pain"]
+        primary = min(
+            group["labels"],
+            key=lambda L: priority.index(L) if L in priority else 99,
+        )
+        primary_color = group["colors"][group["labels"].index(primary)]
+
+        fig.add_hrect(
+            y0=v - band, y1=v + band,
+            fillcolor=primary_color, opacity=0.22,
+            line_width=0, row=1, col=1,
+        )
         fig.add_hline(
-            y=v, line=dict(color=color, width=1.2, dash="solid"),
+            y=v, line=dict(color=primary_color, width=1.1, dash="solid"),
             opacity=0.85, row=1, col=1,
         )
-        # Left-side label (annotation) so it doesn't clash with the price axis.
+        label_text = " + ".join(group["labels"])
         fig.add_annotation(
             xref="x domain", yref="y",
-            x=0.01, y=v, xanchor="left", yanchor="bottom",
-            text=f"<b>{label}</b> ${v:,.2f}",
+            x=0.005, y=v, xanchor="left", yanchor="bottom",
+            text=f"<b>{label_text}</b>  ${v:,.2f}",
             showarrow=False,
-            font=dict(color=color, size=10, family="Inter, system-ui"),
+            font=dict(color=primary_color, size=10, family="Inter, system-ui"),
+            bgcolor="rgba(5,7,11,0.7)",
+            borderpad=2,
         )
 
-    # Spot dashed line
+    # ── Spot ───────────────────────────────────────────────────────────
     fig.add_hline(
         y=spot, line=dict(color=S.YELLOW, width=1, dash="dash"),
         opacity=0.55, row=1, col=1,
+    )
+    fig.add_annotation(
+        xref="x domain", yref="y",
+        x=1.0, y=spot, xanchor="right", yanchor="bottom",
+        text=f"<b>${spot:,.2f}</b>  SPOT",
+        showarrow=False,
+        font=dict(color=S.YELLOW, size=10, family="Inter, system-ui"),
+        bgcolor="rgba(5,7,11,0.7)", borderpad=2,
+        row=1, col=1,
     )
 
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        height=720,
-        margin=dict(l=48, r=48, t=40, b=30),
+        height=760,
+        margin=dict(l=48, r=64, t=40, b=30),
         xaxis_rangeslider_visible=False,
         bargap=0.1,
         font=dict(color=S.TEXT, family="Inter, system-ui"),
         hovermode="x unified",
     )
-    for r in (1, 2):
-        fig.update_xaxes(gridcolor=S.GRID, showline=False,
-                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
-        fig.update_yaxes(gridcolor=S.GRID, showline=False,
-                         tickfont=dict(color=S.MUTED, size=10), row=r, col=1)
-    fig.update_yaxes(tickformat="$,.2f", row=1, col=1)
-    fig.update_yaxes(tickformat=".2s", row=2, col=1)
+    fig.update_xaxes(gridcolor=S.GRID, showline=False,
+                     tickfont=dict(color=S.MUTED, size=10), row=1, col=1)
+    fig.update_xaxes(gridcolor=S.GRID, showline=False,
+                     tickfont=dict(color=S.MUTED, size=10), row=2, col=1)
+    fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat="$,.2f",
+                     tickfont=dict(color=S.MUTED, size=10),
+                     side="right", row=1, col=1)
+    fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat=".2s",
+                     tickfont=dict(color=S.MUTED, size=10), row=2, col=1)
+    fig.update_yaxes(showgrid=False, showticklabels=False,
+                     row=1, col=2)
     return fig
 
 

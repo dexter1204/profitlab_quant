@@ -427,10 +427,16 @@ def _render_chart(ticker: str, use_demo: bool) -> None:
         st.warning(f"Couldn't load bars for {ticker}: {e}")
         return
 
+    gex_profile = exposures.gex_by_strike(chain, ctx)
+
     components.page_title(ticker, is_demo=use_demo, vendor=data.vendor_name())
     st.plotly_chart(
-        components.price_chart(bars, spot=spot, levels=levels,
-                               ticker=ticker, show_levels=show_levels),
+        components.price_chart(
+            bars, spot=spot, levels=levels, ticker=ticker,
+            show_levels=show_levels,
+            gex_profile=gex_profile,
+            strike_window=20,
+        ),
         width="stretch",
     )
     cap_bits = [
