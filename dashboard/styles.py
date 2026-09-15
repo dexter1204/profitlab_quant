@@ -64,15 +64,32 @@ header[data-testid="stHeader"] {{
 [data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarCollapsedControl"] {{
     visibility: visible !important;
-    display: flex !important;
-    z-index: 1000;
+    display: inline-flex !important;
+    width: fit-content !important;
+    max-width: 48px;
+    height: fit-content !important;
+    /* Only the button itself should intercept clicks — otherwise this
+       wrapper stretches over the ticker pills and eats them when the
+       sidebar is collapsed. */
+    pointer-events: none !important;
+    z-index: 50;
+    position: fixed;
+    top: 6px;
+    left: 6px;
+}}
+[data-testid="collapsedControl"] > *,
+[data-testid="stSidebarCollapseButton"] > *,
+[data-testid="stSidebarCollapsedControl"] > * {{
+    pointer-events: auto;
 }}
 [data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapseButton"] button,
 [data-testid="stSidebarCollapsedControl"] button {{
     background: {BG_ELEVATED} !important;
     border: 1px solid {BORDER} !important;
     color: {TEXT_STRONG} !important;
     border-radius: 6px;
+    pointer-events: auto;
 }}
 
 /* Full-bleed dark background */
