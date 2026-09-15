@@ -109,49 +109,41 @@ def _load_bars(ticker: str, use_demo: bool, interval: str, period: str) -> pd.Da
 
 def _sidebar_controls():
     st.sidebar.header("Controls")
-    use_demo = st.sidebar.toggle("Demo data (no network)", value=True)
 
-    # Vendor + credentials are read-only at runtime — configured either in
-    # profitlab/_credentials.py (local, git-ignored) or via env vars.
-    vendor = os.environ.get("PROFITLAB_VENDOR", "yfinance").lower()
-    st.sidebar.subheader("Live data vendor")
-    st.sidebar.markdown(
-        f"<div style='padding:8px 12px;border:1px solid #1f2937;border-radius:6px;"
-        f"background:#0b1220'>"
-        f"<div style='color:#64748b;font-size:10px;letter-spacing:0.14em;"
-        f"text-transform:uppercase;font-weight:700'>Vendor</div>"
-        f"<div style='color:#f8fafc;font-size:14px;font-weight:600'>{vendor}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    st.sidebar.caption(
-        "Change vendor / keys in `profitlab/_credentials.py` "
-        "(copy from `_credentials.example.py`)."
-    )
-
-    if vendor == "polygon_mcp" and not use_demo:
-        if st.sidebar.button("🔍 Test MCP connection"):
-            try:
-                from profitlab.data import polygon_mcp
-                tools = polygon_mcp.list_available_tools()
-                names = [t.get("name", "?") for t in tools]
-                st.sidebar.success(f"Connected · {len(tools)} tools available")
-                required = {
-                    "options snapshot": any("snapshot" in n and "option" in n for n in names),
-                    "aggregates (bars)": any("aggs" in n or "aggregates" in n for n in names),
-                    "stock snapshot": any("snapshot" in n and ("ticker" in n or "stocks" in n) for n in names),
-                }
-                missing = [k for k, ok in required.items() if not ok]
-                if missing:
-                    st.sidebar.warning(
-                        "This listing is missing: " + ", ".join(missing) +
-                        ". The dashboard needs these — consider polygon.io direct "
-                        "or a richer api.market listing."
-                    )
-                with st.sidebar.expander("See tool names"):
-                    st.write(names)
-            except Exception as e:
-                st.sidebar.error(f"{e}")
+    # Data is always live via the configured vendor (from
+    # profitlab/_credentials.py or env). Demo mode is available via a
+    # discreet advanced-settings toggle only.
+    use_demo = False
+    with st.sidebar.expander("Advanced"):
+        vendor = os.environ.get("PROFITLAB_VENDOR", "yfinance").lower()
+        st.caption(f"Vendor: **{vendor}**  ·  edit `profitlab/_credentials.py` to change")
+        use_demo = st.toggle(
+            "Force demo data (offline mock)",
+            value=False,
+            help="Only for debugging when the vendor is unreachable.",
+        )
+        if vendor == "polygon_mcp" and not use_demo:
+            if st.button("🔍 Test MCP connection"):
+                try:
+                    from profitlab.data import polygon_mcp
+                    tools = polygon_mcp.list_available_tools()
+                    names = [t.get("name", "?") for t in tools]
+                    st.success(f"Connected · {len(tools)} tools available")
+                    required = {
+                        "options snapshot": any("snapshot" in n and "option" in n for n in names),
+                        "aggregates (bars)": any("aggs" in n or "aggregates" in n for n in names),
+                        "stock snapshot": any("snapshot" in n and ("ticker" in n or "stocks" in n) for n in names),
+                    }
+                    missing = [k for k, ok in required.items() if not ok]
+                    if missing:
+                        st.warning(
+                            "Missing: " + ", ".join(missing) +
+                            ". Consider polygon.io direct or a richer listing."
+                        )
+                    with st.expander("See tool names"):
+                        st.write(names)
+                except Exception as e:
+                    st.error(f"{e}")
 
     window = st.sidebar.slider("Strike window (steps)", 5, 40, 20)
     st.sidebar.markdown("---")
