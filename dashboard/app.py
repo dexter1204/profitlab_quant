@@ -385,13 +385,20 @@ def _render_market_heatmap_safe(use_demo: bool, remote_logos: bool) -> None:
 
 
 def _render_chart(ticker: str, use_demo: bool) -> None:
-    ctrl_l, ctrl_r = st.columns([3, 2])
+    ctrl_l, ctrl_m, ctrl_r = st.columns([3, 1, 2])
     with ctrl_l:
         interval = st.radio(
             "timeframe",
             options=["1m", "2m", "3m", "5m", "15m", "1d"],
             index=0, horizontal=True, label_visibility="collapsed",
             key="chart_interval",
+        )
+    with ctrl_m:
+        fit_to_price = st.toggle(
+            "Fit to price", value=True,
+            key="chart_fit",
+            help="On: axis follows the candles (levels outside show as edge markers). "
+                 "Off: axis spans every level (candles may look flat).",
         )
     with ctrl_r:
         show_levels = st.multiselect(
@@ -428,6 +435,7 @@ def _render_chart(ticker: str, use_demo: bool) -> None:
             show_levels=show_levels,
             gex_profile=gex_profile,
             strike_window=20,
+            fit_to_price=fit_to_price,
         ),
         width="stretch",
     )

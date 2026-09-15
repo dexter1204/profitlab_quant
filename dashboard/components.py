@@ -958,11 +958,30 @@ def price_chart(
     band_pct: float = 0.0012,  # half-thickness of the colored band per level
     gex_profile: Optional[pd.DataFrame] = None,
     strike_window: int = 20,
+    y_padding_pct: float = 0.015,  # 1.5% padding above/below the price range
+    fit_to_price: bool = True,
 ) -> go.Figure:
-    """Candlestick chart + volume + right-side GEX profile with level
-    bands and merged left-side labels. Matches the reference layout."""
+    """Candlestick chart + volume + right-side GEX profile.
+
+    Y-axis is auto-fit to the actual price range ± padding so candles
+    always have vertical body — levels that fall outside the visible
+    window are drawn as compact edge markers at the top/bottom instead
+    of stretching the axis (which would flatten the candles).
+    """
     show_levels = show_levels or list(_LEVEL_STYLE.keys())
     active_levels = {k: v for k, v in levels.items() if k in show_levels}
+
+    # ── auto-fit y range to price ──────────────────────────────────────
+    if fit_to_price and not bars.empty:
+        p_lo = float(bars["low"].min())
+        p_hi = float(bars["high"].max())
+        # Include spot in the visible band always.
+        p_lo = min(p_lo, spot)
+        p_hi = max(p_hi, spot)
+        pad = (p_hi - p_lo) * y_padding_pct + max(p_hi, 1) * 0.001
+        y_lo, y_hi = p_lo - pad, p_hi + pad
+    else:
+        y_lo = y_hi = None
 
     # 2×2 grid: candle top-left, GEX profile top-right, volume bottom spanning
     fig = make_subplots(
@@ -1003,10 +1022,14 @@ def price_chart(
         row=2, col=1,
     )
 
-    # ── Right side: GEX profile per strike ─────────────────────────────
+    # ── Right side: GEX profile per strike — clipped to visible price ─
     if gex_profile is not None and not gex_profile.empty:
-        step = float(gex_profile["strike"].diff().dropna().median()) if len(gex_profile) > 1 else 1.0
-        lo, hi = spot - strike_window * step, spot + strike_window * step
+        # Filter to the visible y-axis range so bars line up with candles.
+        if y_lo is not None:
+            lo, hi = y_lo, y_hi
+        else:
+            step = float(gex_profile["strike"].diff().dropna().median()) if len(gex_profile) > 1 else 1.0
+            lo, hi = spot - strike_window * step, spot + strike_window * step
         prof = gex_profile[(gex_profile["strike"] >= lo) &
                            (gex_profile["strike"] <= hi)].sort_values("strike")
         if not prof.empty:
@@ -1029,39 +1052,49 @@ def price_chart(
             fig.update_xaxes(showgrid=False, showticklabels=False,
                              showline=False, zeroline=False, row=1, col=2)
 
-    # ── Level bands + merged labels ────────────────────────────────────
+    # ── Level bands + merged labels (only within visible range) ────────
+    priority = ["Gamma Flip", "Call Wall", "Put Wall", "Delta Flip",
+                "Delta Wall", "Major -Δ", "Max Pain"]
     for group in _merge_coincident_levels(active_levels, spot):
         v = group["price"]
-        band = v * band_pct * len(group["labels"])  # thicker if merged
-        # Blend colors within a merged group by picking the most-relevant
-        # (highest-priority: gamma, then call/put, then delta, then pain)
-        priority = ["Gamma Flip", "Call Wall", "Put Wall", "Delta Flip",
-                    "Delta Wall", "Major -Δ", "Max Pain"]
-        primary = min(
-            group["labels"],
-            key=lambda L: priority.index(L) if L in priority else 99,
-        )
+        primary = min(group["labels"],
+                      key=lambda L: priority.index(L) if L in priority else 99)
         primary_color = group["colors"][group["labels"].index(primary)]
-
-        fig.add_hrect(
-            y0=v - band, y1=v + band,
-            fillcolor=primary_color, opacity=0.22,
-            line_width=0, row=1, col=1,
-        )
-        fig.add_hline(
-            y=v, line=dict(color=primary_color, width=1.1, dash="solid"),
-            opacity=0.85, row=1, col=1,
-        )
         label_text = " + ".join(group["labels"])
-        fig.add_annotation(
-            xref="x domain", yref="y",
-            x=0.005, y=v, xanchor="left", yanchor="bottom",
-            text=f"<b>{label_text}</b>  ${v:,.2f}",
-            showarrow=False,
-            font=dict(color=primary_color, size=10, family="Inter, system-ui"),
-            bgcolor="rgba(5,7,11,0.7)",
-            borderpad=2,
-        )
+
+        in_view = (y_lo is None) or (y_lo <= v <= y_hi)
+        if in_view:
+            band = v * band_pct * len(group["labels"])
+            fig.add_hrect(
+                y0=v - band, y1=v + band,
+                fillcolor=primary_color, opacity=0.22,
+                line_width=0, row=1, col=1,
+            )
+            fig.add_hline(
+                y=v, line=dict(color=primary_color, width=1.1, dash="solid"),
+                opacity=0.85, row=1, col=1,
+            )
+            fig.add_annotation(
+                xref="x domain", yref="y",
+                x=0.005, y=v, xanchor="left", yanchor="bottom",
+                text=f"<b>{label_text}</b>  ${v:,.2f}",
+                showarrow=False,
+                font=dict(color=primary_color, size=10, family="Inter, system-ui"),
+                bgcolor="rgba(5,7,11,0.7)", borderpad=2,
+            )
+        else:
+            # Off-screen: pin to top or bottom edge with an arrow.
+            edge_y = y_hi if v > y_hi else y_lo
+            arrow = "▲" if v > y_hi else "▼"
+            fig.add_annotation(
+                xref="x domain", yref="y",
+                x=0.005, y=edge_y,
+                xanchor="left", yanchor="top" if v > y_hi else "bottom",
+                text=f"<b>{arrow} {label_text}</b>  ${v:,.2f}",
+                showarrow=False,
+                font=dict(color=primary_color, size=10, family="Inter, system-ui"),
+                bgcolor="rgba(5,7,11,0.85)", borderpad=2,
+            )
 
     # ── Spot ───────────────────────────────────────────────────────────
     fig.add_hline(
@@ -1082,12 +1115,14 @@ def price_chart(
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        height=760,
-        margin=dict(l=48, r=64, t=40, b=30),
+        autosize=True,
+        height=680,
+        margin=dict(l=48, r=64, t=30, b=30),
         xaxis_rangeslider_visible=False,
         bargap=0.1,
         font=dict(color=S.TEXT, family="Inter, system-ui"),
         hovermode="x unified",
+        dragmode="pan",
     )
     fig.update_xaxes(gridcolor=S.GRID, showline=False,
                      tickfont=dict(color=S.MUTED, size=10), row=1, col=1)
@@ -1096,6 +1131,9 @@ def price_chart(
     fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat="$,.2f",
                      tickfont=dict(color=S.MUTED, size=10),
                      side="right", row=1, col=1)
+    # Lock y range to price band so candles get full vertical space.
+    if y_lo is not None:
+        fig.update_yaxes(range=[y_lo, y_hi], row=1, col=1)
     fig.update_yaxes(gridcolor=S.GRID, showline=False, tickformat=".2s",
                      tickfont=dict(color=S.MUTED, size=10), row=2, col=1)
     fig.update_yaxes(showgrid=False, showticklabels=False,
