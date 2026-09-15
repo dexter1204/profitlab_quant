@@ -1,0 +1,24 @@
+# Streamlit runtime config — read at server boot on Streamlit Community Cloud.
+# Theme values match dashboard/styles.py so the initial paint (before our CSS
+# injects) already uses the dashboard palette instead of Streamlit defaults.
+
+[theme]
+base = "dark"
+primaryColor = "#22c55e"
+backgroundColor = "#05070b"
+secondaryBackgroundColor = "#0b1220"
+textColor = "#e2e8f0"
+font = "sans serif"
+
+[server]
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 25
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true

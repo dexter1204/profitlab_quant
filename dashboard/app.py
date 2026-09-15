@@ -14,6 +14,26 @@ import os
 import sys
 from pathlib import Path
 
+
+def _load_secrets_into_env() -> None:
+    """When running on Streamlit Community Cloud, [App settings → Secrets]
+    populates st.secrets. Copy those into os.environ so the vendor
+    dispatcher and MCP client (which read env vars) pick them up
+    without the user having to paste keys into the sidebar."""
+    try:
+        import streamlit as _st
+        for key in (
+            "PROFITLAB_VENDOR",
+            "POLYGON_API_KEY", "POLYGON_BASE_URL",
+            "POLYGON_MCP_URL", "POLYGON_MCP_KEY",
+            "POLYGON_MCP_TOOL_SPOT", "POLYGON_MCP_TOOL_AGGS",
+            "POLYGON_MCP_TOOL_OPTIONS_SNAPSHOT",
+        ):
+            if key in _st.secrets and _st.secrets[key]:
+                os.environ.setdefault(key, str(_st.secrets[key]))
+    except Exception:
+        pass  # no secrets file → nothing to do
+
 import pandas as pd
 import streamlit as st
 
@@ -33,6 +53,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 styles.inject()
+_load_secrets_into_env()
 
 
 @st.cache_data(ttl=300, show_spinner=False)

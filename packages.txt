@@ -1,0 +1,3 @@
+# apt packages required at build time on Streamlit Community Cloud.
+# Empty by default — the numeric stack (numpy/scipy/pandas/plotly) ships
+# manylinux wheels so nothing extra is needed.

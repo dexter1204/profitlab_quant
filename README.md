@@ -49,6 +49,55 @@ streamlit run dashboard/app.py
 
 Add `?demo=1` to force the deterministic demo chain (no network).
 
+## Deploy to the web (Streamlit Community Cloud, free)
+
+Fastest path — deploys from GitHub, redeploys on every push, free tier
+handles this app comfortably.
+
+1. Push your working branch to GitHub (already done by the workflow
+   here — the branch is `claude/gamma-beta-exposure-dashboard-2dpjlg`,
+   or merge to `main` first).
+2. Sign in at <https://share.streamlit.io> with the GitHub account
+   that owns the repo (`dexter1204`).
+3. Click **New app** and fill in:
+   - **Repository**: `dexter1204/profitlab_quant`
+   - **Branch**: your branch name (or `main`)
+   - **Main file path**: `dashboard/app.py`
+   - **App URL**: pick a subdomain, e.g. `profitlab-quant`.
+4. Click **Advanced settings → Secrets** and paste the content of
+   `.streamlit/secrets.toml.example`, filling in any vendor keys you
+   want the live app to use. When present, the app reads them into
+   `os.environ` at boot so the sidebar controls are pre-populated.
+5. Click **Deploy**. First build takes ~2–3 minutes.
+
+The runtime is pinned to Python 3.11 via `runtime.txt`; system apt
+packages (if ever needed) live in `packages.txt` (currently empty).
+
+### Notes for the live deploy
+
+- **yfinance can 403 from cloud IPs.** Yahoo periodically blocks
+  data-center netblocks. If the deployed app throws 401/403/429 on
+  chain fetches, switch the sidebar vendor to `demo` for a
+  showcase-only mode, or wire a real vendor (Polygon direct is the
+  easiest paid option; see below).
+- **API keys never go into git.** `.streamlit/secrets.toml` is
+  git-ignored. Commit only `.streamlit/secrets.toml.example` and
+  paste the real values into the Streamlit Cloud UI.
+- **Cold start**: free tier apps sleep after ~7 days idle; first hit
+  after sleep takes ~30s to wake.
+
+### Other targets
+
+- **Hugging Face Spaces** — also free, same idea: point at the repo,
+  set `dashboard/app.py` as the entry, add secrets in the Space
+  settings.
+- **Render / Railway / Fly.io** — need a `Procfile` line:
+  `web: streamlit run dashboard/app.py --server.port $PORT
+  --server.address 0.0.0.0`
+- **Docker** — no Dockerfile shipped yet; the app runs cleanly on
+  `python:3.11-slim` with `pip install -r requirements.txt` +
+  `CMD ["streamlit", "run", "dashboard/app.py"]`.
+
 ## Programmatic use
 
 ```python
