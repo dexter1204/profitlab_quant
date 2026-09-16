@@ -17,9 +17,36 @@ def _yf():
     return yf
 
 
+# Display ticker → yfinance symbol. Indices carry a caret; index futures
+# use the =F suffix. yfinance only serves options for the ETF proxies,
+# not the index symbols themselves — SPX/NDX price loads but their option
+# chains come back empty (handled gracefully upstream).
+_SYMBOL_MAP = {
+    "SPX": "^SPX",
+    "NDX": "^NDX",
+    "VIX": "^VIX",
+    "RUT": "^RUT",
+    "NQ":  "NQ=F",
+    "ES":  "ES=F",
+}
+
+# For index tickers with no listed options on yfinance, fall back to the
+# tradable ETF proxy so the options-driven views still work.
+_OPTIONS_PROXY = {
+    "SPX": "SPY",
+    "NDX": "QQQ",
+    "NQ":  "QQQ",
+    "RUT": "IWM",
+}
+
+
+def _sym(ticker: str) -> str:
+    return _SYMBOL_MAP.get(ticker.upper(), ticker)
+
+
 def price_history(ticker: str, period: str = "1y", interval: str = "1d") -> pd.Series:
     yf = _yf()
-    df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
+    df = yf.Ticker(_sym(ticker)).history(period=period, interval=interval, auto_adjust=True)
     if df.empty:
         raise RuntimeError(f"No price history for {ticker!r}")
     return df["Close"].rename(ticker)
@@ -32,17 +59,21 @@ def price_history_batch(tickers: list[str], period: str = "1y") -> dict[str, pd.
     yf = _yf()
     if not tickers:
         return {}
+    # Map display tickers to yfinance symbols, keeping a reverse lookup.
+    sym_for = {tk: _sym(tk) for tk in tickers}
+    syms = list(sym_for.values())
     df = yf.download(
-        " ".join(tickers), period=period, interval="1d",
+        " ".join(syms), period=period, interval="1d",
         group_by="ticker", auto_adjust=True, progress=False, threads=True,
     )
     out: dict[str, pd.Series] = {}
     for tk in tickers:
+        sym = sym_for[tk]
         try:
-            if len(tickers) == 1:
+            if len(syms) == 1:
                 series = df["Close"].dropna()
             else:
-                series = df[tk]["Close"].dropna()
+                series = df[sym]["Close"].dropna()
             if not series.empty:
                 out[tk] = series.rename(tk)
         except (KeyError, TypeError):
@@ -56,7 +87,7 @@ def spot(ticker: str) -> float:
 
 def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.DataFrame:
     yf = _yf()
-    df = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
+    df = yf.Ticker(_sym(ticker)).history(period=period, interval=interval, auto_adjust=True)
     if df.empty:
         raise RuntimeError(f"No intraday bars for {ticker!r}")
     out = pd.DataFrame({
@@ -76,10 +107,27 @@ def option_chain(
     max_expiries: int = 8,
 ) -> pd.DataFrame:
     yf = _yf()
-    tk = yf.Ticker(ticker)
+    # Index tickers (SPX/NDX) have no options on yfinance — use the ETF
+    # proxy (SPY/QQQ) and scale its strikes to the index level by the
+    # live index/proxy price ratio (SPX ≈ 10×SPY, NDX ≈ 41×QQQ), so the
+    # chain lines up with the index spot the rest of the app shows.
+    proxy = _OPTIONS_PROXY.get(ticker.upper())
+    strike_scale = 1.0
+    if proxy:
+        opt_ticker = proxy
+        try:
+            strike_scale = spot(ticker) / spot(proxy)
+        except Exception:
+            strike_scale = 1.0
+    else:
+        opt_ticker = _sym(ticker)
+
+    tk = yf.Ticker(opt_ticker)
     available = list(tk.options)
     if not available:
-        raise RuntimeError(f"No options listed for {ticker!r}")
+        raise RuntimeError(
+            f"No options listed for {ticker!r} (tried {opt_ticker!r})"
+        )
     chosen = expiries or available[:max_expiries]
     frames = []
     for exp in chosen:
@@ -96,7 +144,7 @@ def option_chain(
         raise RuntimeError(f"Empty option chain for {ticker!r}")
     raw = pd.concat(frames, ignore_index=True)
     out = pd.DataFrame({
-        "strike": raw["strike"].astype(float),
+        "strike": raw["strike"].astype(float) * strike_scale,
         "expiry": pd.to_datetime(raw["expiry"]),
         "type": raw["type"].astype(str),
         "oi": raw.get("openInterest", 0).fillna(0).astype(float),

@@ -12,6 +12,8 @@ import pandas as pd
 DEMO_SPOTS = {
     "QQQ": 740.00,
     "SPY": 615.00,
+    "SPX": 6150.0,
+    "NDX": 21000.0,
     "GLD": 245.00,
     "SLV": 34.20,
     "NQ":  20940.0,
