@@ -62,7 +62,7 @@ from profitlab import data, demo, exposures, iv, market, metrics, regime
 from dashboard import components, styles
 
 
-TICKERS = ["QQQ", "SPY", "SPX", "NDX", "GLD", "SLV", "NQ", "AAPL", "TSLA", "NVDA"]
+TICKERS = ["QQQ", "SPY", "SPX", "NDX", "GLD", "SLV", "AAPL", "TSLA", "NVDA"]
 
 
 st.set_page_config(

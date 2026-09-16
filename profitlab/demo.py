@@ -16,7 +16,6 @@ DEMO_SPOTS = {
     "NDX": 21000.0,
     "GLD": 245.00,
     "SLV": 34.20,
-    "NQ":  20940.0,
     "AAPL": 232.5,
     "TSLA": 268.0,
     "NVDA": 138.5,
@@ -95,12 +94,14 @@ def demo_prices() -> dict[str, pd.Series]:
     tickers = list(DEMO_SPOTS.keys()) + ["SPY"]
     for tk in tickers:
         beta_factor = {
-            "QQQ": 1.10, "SPY": 1.00, "GLD": 0.15, "SLV": 0.30,
-            "NQ": 1.10, "AAPL": 1.20, "TSLA": 1.85, "NVDA": 1.60,
+            "QQQ": 1.10, "SPY": 1.00, "SPX": 1.00, "NDX": 1.10,
+            "GLD": 0.15, "SLV": 0.30,
+            "AAPL": 1.20, "TSLA": 1.85, "NVDA": 1.60,
         }.get(tk, 1.0)
         idio = rng.normal(0, 0.012, size=len(dates))
         rets = beta_factor * market_shocks + idio
-        base = {"QQQ": 660.0, "SPY": 555.0, "GLD": 235.0, "SLV": 30.0, "NQ": 19000,
+        base = {"QQQ": 660.0, "SPY": 555.0, "SPX": 5550.0, "NDX": 19000.0,
+                "GLD": 235.0, "SLV": 30.0,
                 "AAPL": 205.0, "TSLA": 220.0, "NVDA": 120.0}.get(tk, 100.0)
         prices = base * np.exp(np.cumsum(rets))
         out[tk] = pd.Series(prices, index=dates, name=tk)

@@ -29,7 +29,7 @@ _REMOTE_LOGO_TEMPLATE = "https://financialmodelingprep.com/image-stock/{ticker}.
 
 # Tickers that don't have a listed equity backing them (indexes, some ETFs
 # not indexed by FMP). Skip the remote lookup and go straight to the SVG chip.
-_REMOTE_LOGO_SKIP = {"SPX", "NDX", "RUT", "VIX", "NQ"}
+_REMOTE_LOGO_SKIP = {"SPX", "NDX", "RUT", "VIX"}
 
 
 BRAND_COLORS: dict[str, str] = {
