@@ -74,25 +74,52 @@ def _get(path: str, params: Optional[dict] = None) -> dict:
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
+def _spot_from_options(ticker: str) -> Optional[float]:
+    """Pull the underlying's last price straight from the options snapshot.
+    Works on the Options-only plan (no Stocks entitlement needed) because
+    the snapshot embeds `underlying_asset.price` on every contract."""
+    try:
+        data = _get(f"/v3/snapshot/options/{ticker.upper()}", {"limit": 1})
+    except RuntimeError:
+        return None
+    for opt in data.get("results", []):
+        ua = opt.get("underlying_asset") or {}
+        px = ua.get("price") or ua.get("value")
+        if px:
+            return float(px)
+    return None
+
+
 def spot(ticker: str) -> float:
-    """Prev-close snapshot ≈ current spot when market is closed; use the
-    unified snapshot when it's open. We try snapshot first, fall back to
-    prev-close."""
+    """Spot price. Tries, in order:
+      1. underlying price embedded in the options snapshot (Options plan)
+      2. stocks snapshot (needs Stocks plan)
+      3. previous-close aggregate (needs Stocks plan)
+    so the Options-only plan still yields a spot for the ribbon/levels."""
     ticker = ticker.upper()
+
+    px = _spot_from_options(ticker)
+    if px:
+        return px
+
     try:
         data = _get(f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}")
         t = data.get("ticker", {})
-        # Prefer today's minute-level close if we have it, otherwise the day's close.
         px = t.get("min", {}).get("c") or t.get("day", {}).get("c") \
              or t.get("prevDay", {}).get("c")
         if px:
             return float(px)
     except RuntimeError:
         pass
+
     data = _get(f"/v2/aggs/ticker/{ticker}/prev")
     results = data.get("results") or []
     if not results:
-        raise RuntimeError(f"Polygon: no spot for {ticker!r}")
+        raise RuntimeError(
+            f"Polygon: no spot for {ticker!r}. On an Options-only plan the "
+            f"stocks endpoints are not entitled — this is expected for "
+            f"views that need underlying price history (chart, beta, heatmap)."
+        )
     return float(results[-1]["c"])
 
 
