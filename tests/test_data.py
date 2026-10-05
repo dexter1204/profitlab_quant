@@ -225,3 +225,32 @@ def test_polygon_intraday_bars_normalizes_aggs():
     assert list(df.columns) == ["ts", "open", "high", "low", "close", "volume"]
     assert len(df) == 2
     assert df["close"].iloc[-1] == 740.6
+
+
+def test_polygon_spot_from_parity_recovers_underlying():
+    """Put-call parity must recover the true underlying spot from option
+    prices alone (used when the snapshot has no underlying price)."""
+    import math
+    from datetime import datetime, timedelta
+    from profitlab.data import polygon as polygon_mod
+
+    r = 0.045
+    exp = (datetime.utcnow().date() + timedelta(days=30)).isoformat()
+    days = (datetime.fromisoformat(exp).date() - datetime.utcnow().date()).days
+    t = max(days, 1) / 365.0
+    disc = math.exp(-r * t)
+    spot = 437.25
+    # price calls/puts at several strikes consistent with parity
+    results = []
+    for k in (430.0, 435.0, 440.0):
+        cp = spot - k * disc  # C - P
+        results += [
+            {"details": {"expiration_date": exp, "strike_price": k,
+                         "contract_type": "call"},
+             "last_trade": {"price": 5.0 + cp / 2}},
+            {"details": {"expiration_date": exp, "strike_price": k,
+                         "contract_type": "put"},
+             "last_trade": {"price": 5.0 - cp / 2}},
+        ]
+    est = polygon_mod._spot_from_parity(results, r=r)
+    assert abs(est - spot) < 0.5, est

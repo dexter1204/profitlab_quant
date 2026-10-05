@@ -97,25 +97,85 @@ def _get(path: str, params: Optional[dict] = None, _retries: int = 2) -> dict:
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
+def _contract_price(opt: dict) -> Optional[float]:
+    """Best available price for one option contract: quote mid, else last
+    trade, else day close."""
+    lq = opt.get("last_quote") or {}
+    bid, ask = lq.get("bid"), lq.get("ask")
+    if bid and ask and bid > 0 and ask > 0:
+        return (float(bid) + float(ask)) / 2.0
+    lt = opt.get("last_trade") or {}
+    if lt.get("price"):
+        return float(lt["price"])
+    day = opt.get("day") or {}
+    if day.get("close"):
+        return float(day["close"])
+    return None
+
+
+def _spot_from_parity(results: list[dict], r: float = 0.045) -> Optional[float]:
+    """Implied underlying spot from put-call parity:  S = C - P + K·e^(-rT).
+    Uses the front expiry and medians across strikes that have both a call
+    and a put priced — accurate to the bid/ask spread, and derived purely
+    from options data (works on an Options-only plan, market open or not)."""
+    from datetime import datetime as _dt
+
+    # group by expiry → strike → {call, put} price
+    by_exp: dict[str, dict[float, dict[str, float]]] = {}
+    for opt in results:
+        det = opt.get("details") or {}
+        exp = det.get("expiration_date")
+        k = det.get("strike_price")
+        kind = det.get("contract_type")
+        if not exp or k is None or kind not in ("call", "put"):
+            continue
+        price = _contract_price(opt)
+        if price is None:
+            continue
+        by_exp.setdefault(exp, {}).setdefault(float(k), {})[kind] = price
+
+    if not by_exp:
+        return None
+    front = min(by_exp)  # nearest expiry date (ISO sorts chronologically)
+    try:
+        days = max((_dt.fromisoformat(front).date() - _dt.utcnow().date()).days, 0)
+    except ValueError:
+        days = 7
+    t = max(days, 1) / 365.0
+    disc = pow(2.718281828, -r * t)
+
+    spots = []
+    for k, legs in by_exp[front].items():
+        if "call" in legs and "put" in legs:
+            spots.append(legs["call"] - legs["put"] + k * disc)
+    if not spots:
+        return None
+    spots.sort()
+    return float(spots[len(spots) // 2])  # median — robust to a bad strike
+
+
 def _spot_from_options(ticker: str) -> Optional[float]:
-    """Pull the underlying's last price from the options snapshot. Works on
-    the Options-only plan. Scans many contracts (not just one) because the
-    underlying price can be null on some contracts / when the market is
-    closed, and also captures an ATM-strike fallback so we never have to
-    touch a stocks endpoint (which 429s on an Options plan)."""
+    """Underlying spot on an Options-only plan, in order of accuracy:
+      1. underlying_asset.price from the snapshot (the real delayed price)
+      2. put-call parity across the front expiry (options-implied spot)
+      3. max-OI strike (≈ ATM) as a last-resort proxy
+    Never touches a stocks endpoint."""
     try:
         data = _get(f"/v3/snapshot/options/{ticker.upper()}", {"limit": 250})
     except RuntimeError:
         return None
     results = data.get("results", [])
-    # 1) direct underlying price from any contract that carries it
+
     for opt in results:
         ua = opt.get("underlying_asset") or {}
         px = ua.get("price") or ua.get("value")
-        if px:
+        if px and float(px) > 0:
             return float(px)
-    # 2) fallback: OI-weighted "max-OI strike" ≈ ATM, a decent spot proxy
-    #    when the live underlying price isn't in the snapshot (e.g. closed).
+
+    parity = _spot_from_parity(results)
+    if parity and parity > 0:
+        return parity
+
     oi_by_strike: dict[float, float] = {}
     for opt in results:
         det = opt.get("details") or {}
@@ -126,7 +186,6 @@ def _spot_from_options(ticker: str) -> Optional[float]:
             opt.get("open_interest") or 0.0
         )
     if oi_by_strike:
-        # strike carrying the most total OI clusters near the money
         return max(oi_by_strike.items(), key=lambda kv: kv[1])[0]
     return None
 
