@@ -21,6 +21,7 @@ Response schema is normalized to match `profitlab.data.__init__`.
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -56,21 +57,43 @@ def _session() -> requests.Session:
     return s
 
 
-def _get(path: str, params: Optional[dict] = None) -> dict:
+def _get(path: str, params: Optional[dict] = None, _retries: int = 2) -> dict:
     """GET wrapper: prepends base URL if `path` is relative; always
     sends the API key as `apiKey` param too (some proxies strip
-    Authorization). Raises RuntimeError on non-2xx with the vendor's
-    error text so it surfaces cleanly in Streamlit."""
+    Authorization).
+
+    Retries on HTTP 429 with exponential backoff (respecting Retry-After
+    when present). 429 happens on an Options-only plan when a *stocks*
+    endpoint is called — those fall back to free-tier limits (5/min) —
+    so the final message names that cause."""
     if path.startswith("http"):
         url = path
     else:
         url = f"{_base_url()}{path if path.startswith('/') else '/' + path}"
     params = dict(params or {})
     params.setdefault("apiKey", _api_key())
-    r = _session().get(url, params=params, timeout=15)
-    if not r.ok:
+
+    delay = 2.0
+    for attempt in range(_retries + 1):
+        r = _session().get(url, params=params, timeout=15)
+        if r.ok:
+            return r.json()
+        if r.status_code == 429 and attempt < _retries:
+            retry_after = r.headers.get("Retry-After")
+            wait = float(retry_after) if (retry_after or "").isdigit() else delay
+            time.sleep(min(wait, 15.0))
+            delay *= 2
+            continue
+        if r.status_code == 429:
+            raise RuntimeError(
+                f"Polygon 429 (rate limit) @ {path}. This is a STOCKS endpoint; "
+                f"your Options plan doesn't entitle stocks data, so it falls back "
+                f"to the free 5-requests/min limit. The gamma views (GEX/DEX, heat "
+                f"maps, OI) use options endpoints and are unaffected — the Chart, "
+                f"Market Heat Map and Portfolio Beta need a Stocks subscription."
+            )
         raise RuntimeError(f"Polygon {r.status_code} @ {path}: {r.text[:200]}")
-    return r.json()
+    raise RuntimeError(f"Polygon: exhausted retries @ {path}")
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
