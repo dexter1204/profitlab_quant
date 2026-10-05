@@ -98,52 +98,53 @@ def _get(path: str, params: Optional[dict] = None, _retries: int = 2) -> dict:
 
 # ── endpoints ──────────────────────────────────────────────────────────────
 def _spot_from_options(ticker: str) -> Optional[float]:
-    """Pull the underlying's last price straight from the options snapshot.
-    Works on the Options-only plan (no Stocks entitlement needed) because
-    the snapshot embeds `underlying_asset.price` on every contract."""
+    """Pull the underlying's last price from the options snapshot. Works on
+    the Options-only plan. Scans many contracts (not just one) because the
+    underlying price can be null on some contracts / when the market is
+    closed, and also captures an ATM-strike fallback so we never have to
+    touch a stocks endpoint (which 429s on an Options plan)."""
     try:
-        data = _get(f"/v3/snapshot/options/{ticker.upper()}", {"limit": 1})
+        data = _get(f"/v3/snapshot/options/{ticker.upper()}", {"limit": 250})
     except RuntimeError:
         return None
-    for opt in data.get("results", []):
+    results = data.get("results", [])
+    # 1) direct underlying price from any contract that carries it
+    for opt in results:
         ua = opt.get("underlying_asset") or {}
         px = ua.get("price") or ua.get("value")
         if px:
             return float(px)
+    # 2) fallback: OI-weighted "max-OI strike" ≈ ATM, a decent spot proxy
+    #    when the live underlying price isn't in the snapshot (e.g. closed).
+    oi_by_strike: dict[float, float] = {}
+    for opt in results:
+        det = opt.get("details") or {}
+        k = det.get("strike_price")
+        if k is None:
+            continue
+        oi_by_strike[float(k)] = oi_by_strike.get(float(k), 0.0) + float(
+            opt.get("open_interest") or 0.0
+        )
+    if oi_by_strike:
+        # strike carrying the most total OI clusters near the money
+        return max(oi_by_strike.items(), key=lambda kv: kv[1])[0]
     return None
 
 
 def spot(ticker: str) -> float:
-    """Spot price. Tries, in order:
-      1. underlying price embedded in the options snapshot (Options plan)
-      2. stocks snapshot (needs Stocks plan)
-      3. previous-close aggregate (needs Stocks plan)
-    so the Options-only plan still yields a spot for the ribbon/levels."""
+    """Spot price derived entirely from options endpoints (Options plan):
+    the underlying price embedded in the options snapshot, or — if absent —
+    the max-OI (≈ATM) strike as a proxy. Never calls stocks endpoints, so
+    it can't 429 on an Options-only plan."""
     ticker = ticker.upper()
-
+    _api_key()  # raise the clear "POLYGON_API_KEY not set" error up front
     px = _spot_from_options(ticker)
     if px:
-        return px
-
-    try:
-        data = _get(f"/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}")
-        t = data.get("ticker", {})
-        px = t.get("min", {}).get("c") or t.get("day", {}).get("c") \
-             or t.get("prevDay", {}).get("c")
-        if px:
-            return float(px)
-    except RuntimeError:
-        pass
-
-    data = _get(f"/v2/aggs/ticker/{ticker}/prev")
-    results = data.get("results") or []
-    if not results:
-        raise RuntimeError(
-            f"Polygon: no spot for {ticker!r}. On an Options-only plan the "
-            f"stocks endpoints are not entitled — this is expected for "
-            f"views that need underlying price history (chart, beta, heatmap)."
-        )
-    return float(results[-1]["c"])
+        return float(px)
+    raise RuntimeError(
+        f"Polygon: couldn't derive a spot for {ticker!r} from the options "
+        f"snapshot — it may have no listed options on this plan."
+    )
 
 
 def price_history(ticker: str, period: str = "1y", interval: str = "1d") -> pd.Series:
