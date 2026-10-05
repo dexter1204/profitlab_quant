@@ -19,11 +19,17 @@ CREDENTIALS: dict[str, str] = {
     # "polygon" or "polygon_mcp" when you fill in the corresponding keys.
     "PROFITLAB_VENDOR": "yfinance",
 
-    # polygon.io direct — Starter plan or higher
+    # Polygon.io — rebranded to Massive.com (Oct 2025). The REST API is the
+    # same and the same key works on both bases:
+    #   https://api.massive.com   (new default)
+    #   https://api.polygon.io    (still supported)
+    # Options-plan keys cover the chain (OI/IV/greeks) and the spot embedded
+    # in the options snapshot; underlying price history (chart/beta/heatmap)
+    # needs a Stocks plan.
     "POLYGON_API_KEY": "",
-    "POLYGON_BASE_URL": "https://api.polygon.io",
+    "POLYGON_BASE_URL": "https://api.massive.com",
 
-    # polygon via api.market MCP gateway
+    # polygon via api.market MCP gateway (alternative to direct REST)
     "POLYGON_MCP_URL": "https://prod.api.market/api/mcp/polygon.io/polygon",
     "POLYGON_MCP_KEY": "",
 
