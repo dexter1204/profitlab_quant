@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ProfitLab Quant — Gamma &amp; Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
+<style>
+  :root{
+    --bg:#05070b; --panel:#0b1220; --border:#1f2937; --grid:#111a2b;
+    --muted:#64748b; --text:#e2e8f0; --text-strong:#f8fafc;
+    --green:#22c55e; --green-soft:#4ade80; --red:#ef4444; --red-soft:#f87171;
+    --amber:#f59e0b; --yellow:#facc15; --purple:#a855f7; --cyan:#06b6d4;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, var(--bg) 60%);
+    color:var(--text); font-family:'Inter',system-ui,sans-serif; letter-spacing:.01em;
+    padding:14px 18px 40px;
+  }
+  .topbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+    border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px}
+  .brand{font-size:18px; font-weight:700; color:var(--text-strong); letter-spacing:.04em}
+  .brand span{color:var(--green)}
+  .search{flex:1; min-width:220px; max-width:420px}
+  select, input{
+    width:100%; background:var(--panel); color:var(--text-strong);
+    border:1px solid var(--border); border-radius:8px; padding:8px 12px;
+    font-family:inherit; font-size:14px;
+  }
+  .badge{padding:3px 8px; border-radius:4px; font-size:10px; letter-spacing:.16em;
+    font-weight:700; text-transform:uppercase; border:1px solid}
+  .badge.live{color:var(--green); border-color:var(--green); background:rgba(34,197,94,.12)}
+  .title{display:flex; align-items:center; gap:12px; margin:4px 0 10px}
+  .title .tk{font-size:22px; font-weight:700; color:var(--text-strong)}
+  .title .sub{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:600}
+
+  .ribbon{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:1px; background:var(--border); border:1px solid var(--border);
+    border-radius:10px; overflow:hidden; margin-bottom:14px}
+  .cell{background:var(--panel); padding:10px 14px; display:flex; flex-direction:column; gap:4px}
+  .cell .lbl{color:var(--muted); font-size:10px; letter-spacing:.16em; font-weight:700; text-transform:uppercase}
+  .cell .val{color:var(--text-strong); font-size:20px; font-weight:600; line-height:1.05; font-variant-numeric:tabular-nums}
+  .cell .sub{font-size:11px; font-weight:500; letter-spacing:.02em}
+  .cell.call .val{color:var(--green)} .cell.put .val{color:var(--red)}
+  .cell.gamma .val{color:var(--purple)} .cell.delta .val{color:var(--cyan)}
+  .cell.pain .val{color:var(--amber)}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+
+  .layout{display:grid; grid-template-columns:3fr 1fr; gap:14px}
+  @media(max-width:900px){ .layout{grid-template-columns:1fr} }
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px}
+  .panel h3{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; margin:0 0 8px; font-weight:700}
+  #chart{width:100%; height:640px}
+  .regime{display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 16px;
+    border-radius:8px; font-weight:700; letter-spacing:.12em; font-size:12px; margin:10px 0 6px}
+  .regime.long{background:rgba(34,197,94,.12); border:1px solid var(--green); color:var(--green-soft); box-shadow:0 0 16px rgba(34,197,94,.22)}
+  .regime.short{background:rgba(239,68,68,.12); border:1px solid var(--red); color:var(--red-soft); box-shadow:0 0 16px rgba(239,68,68,.22)}
+  .regime.trans{background:rgba(250,204,21,.10); border:1px solid var(--yellow); color:var(--yellow)}
+  .regime .dot{width:8px; height:8px; border-radius:50%; background:currentColor; box-shadow:0 0 10px currentColor}
+  .price-big{font-size:30px; font-weight:600; color:var(--text-strong); font-variant-numeric:tabular-nums}
+  .reading{color:var(--muted); font-size:12px; margin-top:6px; text-align:center}
+  .statrow{display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:11px; letter-spacing:.08em}
+  .statrow .k{color:var(--muted); text-transform:uppercase; font-weight:700}
+  .statrow .v{color:var(--text-strong); font-weight:600; font-variant-numeric:tabular-nums}
+  .error{background:rgba(239,68,68,.1); border:1px solid var(--red); color:var(--red-soft);
+    border-radius:8px; padding:12px 14px; margin:10px 0; font-size:13px}
+  .loading{color:var(--muted); font-size:13px; padding:20px 0}
+  optgroup{color:var(--muted); font-weight:700}
+  option{color:var(--text-strong)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Profit<span>Lab</span> Quant</div>
+    <div class="search">
+      <select id="ticker" aria-label="ticker"></select>
+    </div>
+    <span class="badge live" id="statusBadge">● LIVE</span>
+  </div>
+
+  <div class="title">
+    <span class="tk" id="tkName">QQQ</span>
+    <span class="sub">Gamma &amp; Beta Exposure</span>
+  </div>
+
+  <div id="err"></div>
+  <div class="ribbon" id="ribbon"></div>
+
+  <div class="layout">
+    <div class="panel">
+      <div id="chart"><div class="loading">Cargando…</div></div>
+    </div>
+    <div>
+      <div class="panel" id="regimePanel"></div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="universe.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

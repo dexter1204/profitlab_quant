@@ -1,0 +1,8 @@
+# Backend-only requirements (Render). No streamlit / plotly / scipy —
+# the frontend renders with Plotly.js in the browser.
+numpy>=1.26
+pandas>=2.1
+requests>=2.31
+yfinance>=0.2.40
+fastapi>=0.110
+uvicorn[standard]>=0.29

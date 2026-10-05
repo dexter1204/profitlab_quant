@@ -49,10 +49,21 @@ streamlit run dashboard/app.py
 
 Add `?demo=1` to force the deterministic demo chain (no network).
 
+## Deploy to your own domain (no Streamlit) — recommended
+
+To run this on your own website (e.g. `profitlab-academy.com/quantsistem`)
+without Streamlit, use the **static frontend + FastAPI backend** split:
+
+- `web/` → static HTML/JS (Plotly.js), uploaded to SiteGround shared hosting.
+- `api/` → FastAPI backend (reuses `profitlab/`), deployed to Render, holds
+  the Polygon/Massive API key server-side.
+
+Full step-by-step is in **[DEPLOY_WEB.md](DEPLOY_WEB.md)**.
+
 ## Deploy to the web (Streamlit Community Cloud, free)
 
-Fastest path — deploys from GitHub, redeploys on every push, free tier
-handles this app comfortably.
+Fastest path for a quick showcase — deploys from GitHub, redeploys on every
+push, free tier handles this app comfortably.
 
 1. Push your working branch to GitHub (already done by the workflow
    here — the branch is `claude/gamma-beta-exposure-dashboard-2dpjlg`,
