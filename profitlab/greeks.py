@@ -8,9 +8,33 @@ yield `q` are continuously compounded.
 from __future__ import annotations
 
 import numpy as np
-from scipy.stats import norm
 
 SQRT_2PI = np.sqrt(2.0 * np.pi)
+
+
+def _erf(x):
+    """Vectorized error function — Abramowitz & Stegun 7.1.26.
+    Max abs error ~1.5e-7, which is far below any options-data noise.
+    Pure numpy so the project needs no scipy (whose compiled DLLs get
+    blocked by Windows Smart App Control on some machines)."""
+    x = np.asarray(x, dtype=float)
+    sign = np.sign(x)
+    ax = np.abs(x)
+    t = 1.0 / (1.0 + 0.3275911 * ax)
+    poly = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t
+             - 0.284496736) * t + 0.254829592) * t
+    return sign * (1.0 - poly * np.exp(-ax * ax))
+
+
+class _Norm:
+    """Minimal drop-in for scipy.stats.norm — only cdf is needed here."""
+
+    @staticmethod
+    def cdf(x):
+        return 0.5 * (1.0 + _erf(np.asarray(x, dtype=float) / np.sqrt(2.0)))
+
+
+norm = _Norm()
 
 
 def _d1_d2(spot, strike, t, r, sigma, q):
