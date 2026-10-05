@@ -23,6 +23,22 @@ system is split in two:
 
 Do these in order: **backend first** (you need its URL), then the frontend.
 
+### Views / API endpoints
+
+The frontend has five tabs, each backed by one endpoint:
+
+| Tab | Endpoint | Shows |
+|---|---|---|
+| Gamma & Flow | `GET /api/analyze/{ticker}` | metric ribbon, GEX profile + DEX overlay, dealer regime |
+| Chart | `GET /api/chart/{ticker}` | intraday candles with the GEX profile at the side + key level lines |
+| GEX Heatmap | `GET /api/gex_heatmap/{ticker}` | GEX on a strike × expiry grid |
+| OI / % OI | `GET /api/oi/{ticker}` | call/put open interest per strike (toggle absolute ↔ % of total) |
+| Market Heatmap | `GET /api/market` | sector treemap colored by day change + breadth summary |
+
+(`GET /api/iv/{ticker}` is also available for IV-vs-realized premium.)
+Intraday candles are best-effort — if the vendor/plan doesn't serve them for
+a symbol, the Chart tab still shows the GEX profile and levels.
+
 ---
 
 ## Part 1 — Backend on Render

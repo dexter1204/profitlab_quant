@@ -37,6 +37,15 @@
   .title .tk{font-size:22px; font-weight:700; color:var(--text-strong)}
   .title .sub{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:600}
 
+  /* ── tabs ── */
+  .tabs{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px;
+    border-bottom:1px solid var(--border)}
+  .tab{appearance:none; background:transparent; border:0; color:var(--muted);
+    font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.04em;
+    padding:9px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px}
+  .tab:hover{color:var(--text)}
+  .tab.active{color:var(--text-strong); border-bottom-color:var(--green)}
+
   .ribbon{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
     gap:1px; background:var(--border); border:1px solid var(--border);
     border-radius:10px; overflow:hidden; margin-bottom:14px}
@@ -53,7 +62,8 @@
   @media(max-width:900px){ .layout{grid-template-columns:1fr} }
   .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px}
   .panel h3{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; margin:0 0 8px; font-weight:700}
-  #chart{width:100%; height:640px}
+  .plot{width:100%; height:640px}
+  .plot.tall{height:720px}
   .regime{display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 16px;
     border-radius:8px; font-weight:700; letter-spacing:.12em; font-size:12px; margin:10px 0 6px}
   .regime.long{background:rgba(34,197,94,.12); border:1px solid var(--green); color:var(--green-soft); box-shadow:0 0 16px rgba(34,197,94,.22)}
@@ -70,6 +80,20 @@
   .loading{color:var(--muted); font-size:13px; padding:20px 0}
   optgroup{color:var(--muted); font-weight:700}
   option{color:var(--text-strong)}
+
+  /* ── toolbar (per-view controls) ── */
+  .toolbar{display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap}
+  .seg{display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden}
+  .seg button{appearance:none; background:var(--panel); border:0; color:var(--muted);
+    font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; cursor:pointer}
+  .seg button.active{background:rgba(34,197,94,.14); color:var(--green-soft)}
+  .hint{color:var(--muted); font-size:11px}
+
+  /* ── market summary strip ── */
+  .msum{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:1px;
+    background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:12px}
+
+  .hidden{display:none !important}
 </style>
 </head>
 <body>
@@ -86,17 +110,52 @@
     <span class="sub">Gamma &amp; Beta Exposure</span>
   </div>
 
-  <div id="err"></div>
-  <div class="ribbon" id="ribbon"></div>
-
-  <div class="layout">
-    <div class="panel">
-      <div id="chart"><div class="loading">Cargando…</div></div>
-    </div>
-    <div>
-      <div class="panel" id="regimePanel"></div>
-    </div>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
+    <button class="tab" data-view="chart">Chart</button>
+    <button class="tab" data-view="gexheat">GEX Heatmap</button>
+    <button class="tab" data-view="oi">OI / % OI</button>
+    <button class="tab" data-view="market">Market Heatmap</button>
   </div>
+
+  <div id="err"></div>
+
+  <!-- ── GAMMA & FLOW ── -->
+  <section id="view-gamma" class="view">
+    <div class="ribbon" id="ribbon"></div>
+    <div class="layout">
+      <div class="panel"><div id="gammaChart" class="plot"><div class="loading">Cargando…</div></div></div>
+      <div><div class="panel" id="regimePanel"></div></div>
+    </div>
+  </section>
+
+  <!-- ── CHART ── -->
+  <section id="view-chart" class="view hidden">
+    <div class="panel"><div id="priceChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── GEX HEATMAP ── -->
+  <section id="view-gexheat" class="view hidden">
+    <div class="panel"><div id="gexHeat" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── OI / % OI ── -->
+  <section id="view-oi" class="view hidden">
+    <div class="toolbar">
+      <div class="seg" id="oiMode">
+        <button data-mode="oi" class="active">Open Interest</button>
+        <button data-mode="pct">% of total OI</button>
+      </div>
+      <span class="hint">green = calls · red = puts</span>
+    </div>
+    <div class="panel"><div id="oiChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── MARKET HEATMAP ── -->
+  <section id="view-market" class="view hidden">
+    <div class="msum" id="marketSummary"></div>
+    <div class="panel"><div id="marketHeat" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
 
   <script src="config.js"></script>
   <script src="universe.js"></script>

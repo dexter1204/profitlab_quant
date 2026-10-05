@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from profitlab import exposures, metrics, regime  # noqa: E402
+from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
@@ -89,58 +89,106 @@ def health():
     return {"ok": True, "vendor": pdata.vendor_name(), "ts": time.time()}
 
 
+def _strike_step(strikes) -> float:
+    s = pd.Series(pd.unique(pd.Series(strikes).sort_values()))
+    d = s.diff().dropna()
+    return float(d.median()) if len(d) else 1.0
+
+
+def _gamma_payload(ticker: str, window: int) -> dict:
+    """Core Gamma & Flow computation shared by /analyze and /chart."""
+    chain = pdata.option_chain(ticker)
+    spot = pdata.spot(ticker)
+    ctx = exposures.ChainContext(
+        spot=spot,
+        asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
+    )
+    gex = exposures.gex_by_strike(chain, ctx)
+    dex = exposures.dex_by_strike(chain, ctx)
+    totals = exposures.totals(chain, ctx)
+    levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
+    reg = regime.classify(spot, levels.get("gamma_flip"),
+                          total_gex=totals.get("gex"))
+
+    step = _strike_step(gex["strike"])
+    lo, hi = spot - window * step, spot + window * step
+    g = gex[(gex["strike"] >= lo) & (gex["strike"] <= hi)].sort_values("strike")
+    d = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi)].sort_values("strike")
+
+    return {
+        "ticker": ticker,
+        "vendor": pdata.vendor_name(),
+        "spot": _clean(spot),
+        "asof": ctx.asof.isoformat(),
+        "levels": {k: _clean(v) for k, v in levels.items()},
+        "totals": {k: _clean(v) for k, v in totals.items()},
+        "regime": {
+            "label": reg.label,
+            "reading": reg.reading,
+            "g_flip": _clean(reg.g_flip),
+            "gap_pct": _clean(reg.gap_pct),
+        },
+        "strikes": [float(s) for s in g["strike"]],
+        "gex": [_clean(v) for v in g["gex"]],
+        "dex_strikes": [float(s) for s in d["strike"]],
+        "dex": [_clean(v) for v in d["dex"]],
+    }
+
+
 @app.get("/api/analyze/{ticker}")
 def analyze(ticker: str, window: int = Query(20, ge=5, le=60)):
     """Everything the Gamma & Flow view needs for one ticker, as JSON."""
     ticker = ticker.upper().strip()
+    try:
+        return _cached(f"analyze:{ticker}:{window}",
+                       lambda: _gamma_payload(ticker, window))
+    except Exception as e:  # surface vendor errors cleanly to the frontend
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/chart/{ticker}")
+def chart(ticker: str,
+          interval: str = Query("1m"),
+          period: str = Query("1d"),
+          window: int = Query(24, ge=5, le=60)):
+    """Intraday OHLC candles + the GEX-by-strike profile and key levels so
+    the frontend can draw a pro-style chart with the gamma profile at the
+    side. Bars are best-effort (some vendors/plans don't serve intraday
+    stock bars); the gamma profile always comes back."""
+    ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
-        ctx = exposures.ChainContext(
-            spot=spot,
-            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
-        )
-        gex = exposures.gex_by_strike(chain, ctx)
-        dex = exposures.dex_by_strike(chain, ctx)
-        totals = exposures.totals(chain, ctx)
-        levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
-        reg = regime.classify(spot, levels.get("gamma_flip"),
-                              total_gex=totals.get("gex"))
-
-        # window around spot for the chart
-        step = float(gex["strike"].diff().dropna().median()) if len(gex) > 1 else 1.0
-        lo, hi = spot - window * step, spot + window * step
-        g = gex[(gex["strike"] >= lo) & (gex["strike"] <= hi)].sort_values("strike")
-        d = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi)].sort_values("strike")
-
-        return {
-            "ticker": ticker,
-            "vendor": pdata.vendor_name(),
-            "spot": _clean(spot),
-            "asof": ctx.asof.isoformat(),
-            "levels": {k: _clean(v) for k, v in levels.items()},
-            "totals": {k: _clean(v) for k, v in totals.items()},
-            "regime": {
-                "label": reg.label,
-                "reading": reg.reading,
-                "g_flip": _clean(reg.g_flip),
-                "gap_pct": _clean(reg.gap_pct),
-            },
-            "strikes": [float(s) for s in g["strike"]],
-            "gex": [_clean(v) for v in g["gex"]],
-            "dex_strikes": [float(s) for s in d["strike"]],
-            "dex": [_clean(v) for v in d["dex"]],
-        }
+        payload = _gamma_payload(ticker, window)
+        bars = []
+        try:
+            df = pdata.intraday_bars(ticker, interval=interval, period=period)
+            if df is not None and len(df):
+                df = df.dropna(subset=["open", "high", "low", "close"])
+                bars = [
+                    {
+                        "t": pd.Timestamp(r.ts).isoformat(),
+                        "o": _clean(r.open), "h": _clean(r.high),
+                        "l": _clean(r.low), "c": _clean(r.close),
+                        "v": _clean(getattr(r, "volume", None)),
+                    }
+                    for r in df.itertuples(index=False)
+                ]
+        except Exception:
+            bars = []  # chart still renders the gamma profile + levels
+        payload["bars"] = bars
+        payload["interval"] = interval
+        return payload
 
     try:
-        return _cached(f"analyze:{ticker}:{window}", _compute)
-    except Exception as e:  # surface vendor errors cleanly to the frontend
+        return _cached(f"chart:{ticker}:{interval}:{period}:{window}", _compute)
+    except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/api/oi/{ticker}")
 def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
+    """Call/put open interest per strike (and each as a share of total OI)
+    — powers the OI and % OI view."""
     ticker = ticker.upper().strip()
 
     def _compute():
@@ -153,8 +201,7 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
         if "put" not in tbl:
             tbl["put"] = 0.0
         total = float(tbl["call"].sum() + tbl["put"].sum()) or 1.0
-        strikes = tbl.index.to_numpy()
-        step = float(pd.Series(strikes).diff().dropna().median()) if len(strikes) > 1 else 1.0
+        step = _strike_step(tbl.index.to_numpy())
         lo, hi = spot - window * step, spot + window * step
         view = tbl[(tbl.index >= lo) & (tbl.index <= hi)].sort_index()
         return {
@@ -168,5 +215,102 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
 
     try:
         return _cached(f"oi:{ticker}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/gex_heatmap/{ticker}")
+def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
+    """GEX on a strike × expiry grid — the GEX heat map. Returns a dense
+    matrix `z[strike_index][expiry_index]` plus the axes."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        ctx = exposures.ChainContext(
+            spot=spot,
+            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
+        )
+        grid = exposures.gex_by_strike_expiry(chain, ctx)
+        step = _strike_step(grid["strike"])
+        lo, hi = spot - window * step, spot + window * step
+        grid = grid[(grid["strike"] >= lo) & (grid["strike"] <= hi)]
+        wide = (grid.pivot(index="strike", columns="expiry", values="gex")
+                .sort_index())
+        wide = wide.reindex(sorted(wide.columns), axis=1)
+        strikes = [float(s) for s in wide.index]
+        expiries = [pd.Timestamp(c).strftime("%Y-%m-%d") for c in wide.columns]
+        z = [[_clean(v) for v in row] for row in wide.to_numpy()]
+        return {
+            "ticker": ticker, "spot": _clean(spot),
+            "strikes": strikes, "expiries": expiries, "z": z,
+        }
+
+    try:
+        return _cached(f"gexheat:{ticker}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/iv/{ticker}")
+def iv_premium(ticker: str):
+    """ATM IV vs realized vol (HV10/30/60), premium and term structure."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        by_exp = exposures.iv_by_expiry(chain, spot)
+        iv_atm = float(by_exp["atm_iv"].iloc[0]) if len(by_exp) else float("nan")
+        front = iv_atm
+        back = float(by_exp["atm_iv"].iloc[-1]) if len(by_exp) else None
+        closes = pdata.price_history(ticker, period="6mo", interval="1d")
+        snap = ivmod.snapshot(iv_atm, closes, front_iv=front, back_iv=back)
+        return {"ticker": ticker, "spot": _clean(spot),
+                **{k: _clean(v) if isinstance(v, (int, float)) else v
+                   for k, v in snap.as_dict().items()}}
+
+    try:
+        return _cached(f"iv:{ticker}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/market")
+def market_heatmap():
+    """Day-change treemap data for the market universe. Falls back to the
+    deterministic demo universe if the live vendor returns nothing (e.g. an
+    options-only plan can't price the stock universe)."""
+
+    def _compute():
+        try:
+            df = market.live_heatmap()
+        except Exception:
+            df = None
+        source = "live"
+        if df is None or len(df) < 3:
+            df = market.demo_heatmap()
+            source = "demo"
+        s = market.summarize(df)
+        rows = [
+            {"ticker": r.ticker, "sector": r.sector,
+             "price": _clean(r.price), "pct": _clean(r.pct),
+             "weight": _clean(r.weight)}
+            for r in df.itertuples(index=False)
+        ]
+        return {
+            "source": source,
+            "rows": rows,
+            "summary": {
+                "n_symbols": s.n_symbols, "n_up": s.n_up, "n_down": s.n_down,
+                "breadth_pct": _clean(s.breadth_pct),
+                "best": {"ticker": s.best[0], "pct": _clean(s.best[1])},
+                "worst": {"ticker": s.worst[0], "pct": _clean(s.worst[1])},
+            },
+        }
+
+    try:
+        return _cached("market", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
