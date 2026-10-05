@@ -1,4 +1,4 @@
-from . import beta, data, demo, exposures, greeks, iv, market, metrics, regime
+from . import beta, data, demo, exposures, greeks, iv, market, metrics, regime, universe
 
 __all__ = [
     "beta",
@@ -10,4 +10,5 @@ __all__ = [
     "market",
     "metrics",
     "regime",
+    "universe",
 ]

@@ -58,7 +58,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from profitlab import beta as beta_mod
-from profitlab import data, demo, exposures, iv, market, metrics, regime
+from profitlab import data, demo, exposures, iv, market, metrics, regime, universe
 from dashboard import components, styles
 
 
@@ -361,7 +361,16 @@ def _render_gamma_flow(ticker: str, use_demo: bool, window: int, positions_df) -
         exps = sorted(chain["expiry"].unique())
         front_iv = float(chain[chain["expiry"] == exps[0]]["iv"].median()) if exps else None
         back_iv = float(chain[chain["expiry"] == exps[-1]]["iv"].median()) if len(exps) > 1 else None
-        iv_snap = iv.snapshot(atm_iv, prices[ticker], front_iv=front_iv, back_iv=back_iv)
+        # The searched ticker may not be in the batch-loaded price set — fetch
+        # its history on demand; fall back to an empty series (IV premium then
+        # shows "insufficient HV history" rather than crashing).
+        series = prices.get(ticker)
+        if series is None:
+            try:
+                series = data.price_history(ticker, period="1y")
+            except Exception:
+                series = pd.Series(dtype=float)
+        iv_snap = iv.snapshot(atm_iv, series, front_iv=front_iv, back_iv=back_iv)
         reg = regime.classify(spot, levels.get("gamma_flip"),
                               total_gex=totals.get("gex"))
         components.regime_panel(reg, iv_snap, ticker, spot)
@@ -491,13 +500,16 @@ def main() -> None:
 
     top_l, top_r = st.columns([3, 2])
     with top_l:
-        ticker = st.radio(
+        picked = st.selectbox(
             "ticker",
-            options=TICKERS,
-            horizontal=True,
+            options=universe.SEARCH_LIST,
+            index=universe.SEARCH_LIST.index("QQQ") if "QQQ" in universe.SEARCH_LIST else 0,
             label_visibility="collapsed",
             key="ticker_selector",
+            accept_new_options=True,
+            placeholder="Search ticker — type any symbol (AAPL, SPX, GLD…)",
         )
+        ticker = (picked or "QQQ").upper().strip()
     with top_r:
         view = st.radio(
             "view",
