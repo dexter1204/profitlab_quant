@@ -500,16 +500,25 @@ def main() -> None:
 
     top_l, top_r = st.columns([3, 2])
     with top_l:
+        default_idx = universe.SEARCH_LIST.index("QQQ") if "QQQ" in universe.SEARCH_LIST else 0
         picked = st.selectbox(
             "ticker",
             options=universe.SEARCH_LIST,
-            index=universe.SEARCH_LIST.index("QQQ") if "QQQ" in universe.SEARCH_LIST else 0,
+            index=default_idx,
             label_visibility="collapsed",
             key="ticker_selector",
             accept_new_options=True,
-            placeholder="Search ticker — type any symbol (AAPL, SPX, GLD…)",
+            placeholder="Search — options, futures or index symbol…",
         )
-        ticker = (picked or "QQQ").upper().strip()
+        # Resolve headers (no-op) and futures (→ gamma underlying). Remember
+        # the last valid pick so selecting a section header doesn't blank out.
+        resolved = universe.resolve(picked)
+        if resolved is None:
+            resolved = st.session_state.get("_last_ticker", "QQQ")
+        ticker = resolved
+        st.session_state["_last_ticker"] = ticker
+        if universe.is_futures(picked):
+            st.caption(f"**{picked.upper()}** futures → gamma from **{ticker}**")
     with top_r:
         view = st.radio(
             "view",
