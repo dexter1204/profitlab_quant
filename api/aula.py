@@ -1,24 +1,16 @@
-"""Single sign-on with the Profit Lab Aula Virtual.
+"""Access control via the Profit Lab Aula Virtual.
 
-The dashboard reuses the Aula's accounts: students log in once in the Aula
-(profitlab-academy.com/aulavirtual), their JWT is stored in the shared
-`pl_token` localStorage key (same origin), and the quant frontend sends it
-here as a Bearer token.
+The dashboard reuses the Aula accounts (shared `pl_token`, same domain) and
+gates access by a **coupon** or a **payment**, both handled by the Aula's PHP
+API against its own MySQL. This backend keeps no users and no database — on
+each data request it asks the Aula whether the caller has quant access:
 
-This backend does NOT keep its own users or touch MySQL. It delegates to the
-Aula's PHP API:
-    GET {AULA_API_BASE}/auth/me          → validates the token, returns the user
-    GET {AULA_API_BASE}/enrollments/me   → the user's course enrollments
+    GET {AULA_API_BASE}/quant/me   → { has_access, access_until, user, ... }
 
-Access to the quant dashboard = being enrolled in the "ProfitLab Quant"
-course (matched by id, exact title, or slug prefix), or being an Aula admin.
-
-Env vars:
-    AULA_API_BASE      default https://profitlab-academy.com/aulavirtual/api
-    QUANT_COURSE_ID    exact course id (most precise); optional
-    QUANT_COURSE_TITLE default "ProfitLab Quant" (matched case-insensitively)
-    AULA_CACHE_TTL     seconds to cache an access decision per token (default 120)
-    AULA_TIMEOUT       HTTP timeout to the Aula API (default 8s)
+Env:
+    AULA_API_BASE    default https://profitlab-academy.com/aulavirtual/api
+    AULA_CACHE_TTL   seconds to cache a decision per token (default 60)
+    AULA_TIMEOUT     HTTP timeout to the Aula API (default 8s)
 """
 
 from __future__ import annotations
@@ -32,116 +24,63 @@ from fastapi import Header, HTTPException
 AULA_API_BASE = os.environ.get(
     "AULA_API_BASE", "https://profitlab-academy.com/aulavirtual/api"
 ).rstrip("/")
-QUANT_COURSE_ID = os.environ.get("QUANT_COURSE_ID", "").strip()
-QUANT_COURSE_TITLE = os.environ.get("QUANT_COURSE_TITLE", "ProfitLab Quant").strip().lower()
-_TTL = float(os.environ.get("AULA_CACHE_TTL", "120"))
+_TTL = float(os.environ.get("AULA_CACHE_TTL", "60"))
 _TIMEOUT = float(os.environ.get("AULA_TIMEOUT", "8"))
 
 _cache: dict[str, tuple[float, dict]] = {}
 
 
-def _slug_prefix() -> str:
-    # The Aula slugifies "ProfitLab Quant" → "profitlab-quant-xxxx"; match the stem.
-    return "".join(c if c.isalnum() else "-" for c in QUANT_COURSE_TITLE).strip("-")
-
-
-def _course_matches(course: dict) -> bool:
-    if not course:
-        return False
-    if QUANT_COURSE_ID and str(course.get("id", "")) == QUANT_COURSE_ID:
-        return True
-    title = str(course.get("title", "")).strip().lower()
-    if QUANT_COURSE_TITLE and title == QUANT_COURSE_TITLE:
-        return True
-    slug = str(course.get("slug", "")).strip().lower()
-    if slug and slug.startswith(_slug_prefix()):
-        return True
-    return False
-
-
-def _aula_get(path: str, token: str):
-    return requests.get(
-        f"{AULA_API_BASE}{path}",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        timeout=_TIMEOUT,
-    )
-
-
 def resolve_access(token: str) -> dict:
-    """Decide access for a token. Returns a dict with:
-        authenticated: bool, has_access: bool, user: {...}|None, error: str|None
-    Cached per token for _TTL seconds. Never raises for auth logic; `error`
-    is set only when the Aula API can't be reached."""
+    """Ask the Aula whether this token's user has quant access. Cached per
+    token for _TTL seconds. `error` is set only on network failure."""
     now = time.time()
     hit = _cache.get(token)
     if hit and now - hit[0] < _TTL:
         return hit[1]
-
     try:
-        me = _aula_get("/auth/me", token)
+        r = requests.get(
+            f"{AULA_API_BASE}/quant/me",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=_TIMEOUT,
+        )
     except requests.RequestException:
         return {"authenticated": False, "has_access": False, "user": None, "error": "aula_unreachable"}
 
-    if me.status_code == 401:
+    if r.status_code == 401:
         dec = {"authenticated": False, "has_access": False, "user": None, "error": None}
         _cache[token] = (now, dec)
         return dec
-    if not me.ok:
+    if not r.ok:
         return {"authenticated": False, "has_access": False, "user": None, "error": "aula_error"}
 
-    user = me.json() or {}
-    pub = {"id": user.get("id"), "name": user.get("name"),
-           "email": user.get("email"), "role": user.get("role")}
-
-    if pub["role"] == "admin":
-        dec = {"authenticated": True, "has_access": True, "user": pub, "error": None}
-        _cache[token] = (now, dec)
-        return dec
-
-    has = False
-    try:
-        enr = _aula_get("/enrollments/me", token)
-        rows = enr.json() if enr.ok else []
-    except requests.RequestException:
-        rows = []
-    for e in rows or []:
-        if _course_matches((e or {}).get("course") or {}):
-            has = True
-            break
-
-    dec = {"authenticated": True, "has_access": has, "user": pub, "error": None}
+    d = r.json() or {}
+    dec = {
+        "authenticated": True,
+        "has_access": bool(d.get("has_access")),
+        "user": d.get("user"),
+        "access_until": d.get("access_until"),
+        "error": None,
+    }
     _cache[token] = (now, dec)
     return dec
 
 
-def _token_from_header(authorization: str | None) -> str | None:
+def _token(authorization: str | None) -> str | None:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     return authorization.split(" ", 1)[1].strip() or None
 
 
-def access_status(authorization: str = Header(None)) -> dict:
-    """Public status endpoint helper: never 401/403, just reports the decision
-    so the frontend can route the user (login / buy course / dashboard)."""
-    token = _token_from_header(authorization)
-    if not token:
-        return {"authenticated": False, "has_access": False, "user": None}
-    dec = resolve_access(token)
-    if dec.get("error") == "aula_unreachable":
-        raise HTTPException(status_code=503, detail="No se pudo contactar el Aula Virtual")
-    return {"authenticated": dec["authenticated"], "has_access": dec["has_access"], "user": dec["user"]}
-
-
 def require_access(authorization: str = Header(None)):
-    """Gate for data endpoints: valid Aula session + quant-course enrollment."""
-    token = _token_from_header(authorization)
-    if not token:
+    """Gate for data endpoints: valid Aula session with active quant access."""
+    tok = _token(authorization)
+    if not tok:
         raise HTTPException(status_code=401, detail="No autenticado")
-    dec = resolve_access(token)
+    dec = resolve_access(tok)
     if dec.get("error") == "aula_unreachable":
         raise HTTPException(status_code=503, detail="No se pudo contactar el Aula Virtual")
     if not dec["authenticated"]:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
     if not dec["has_access"]:
-        raise HTTPException(status_code=403, detail="No tienes acceso al dashboard ProfitLab Quant")
+        raise HTTPException(status_code=403, detail="Acceso no activo. Canjea un cupón o adquiere el acceso.")
     return dec["user"]

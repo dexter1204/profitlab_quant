@@ -30,13 +30,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fastapi import Depends, Header  # noqa: E402
+from fastapi import Depends  # noqa: E402
 
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
 
-from . import aula  # noqa: E402  — SSO with the Aula Virtual
-from .aula import require_access  # noqa: E402
+from .aula import require_access  # noqa: E402  — access via the Aula Virtual
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
 
@@ -55,15 +54,8 @@ app.add_middleware(
 )
 
 
-@app.get("/api/access")
-def access(authorization: str = Header(None)):
-    """Reports the Aula session + quant-course access so the frontend can
-    route the visitor (login / enroll / dashboard)."""
-    return aula.access_status(authorization)
-
-
-# Every market-data endpoint requires a valid Aula session enrolled in the
-# ProfitLab Quant course (or an Aula admin).
+# Every market-data endpoint requires a valid Aula session with active quant
+# access (granted by a coupon or a payment — enforced by the Aula API).
 GATED = [Depends(require_access)]
 
 

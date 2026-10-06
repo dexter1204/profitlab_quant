@@ -71,7 +71,7 @@
     if (!API) throw new Error("API no configurada. Edita config.js con la URL de tu backend (Render).");
     const res = await fetch(`${API}${path}`, { headers: window.PLAuth.authHeaders() });
     if (res.status === 401) { window.PLAuth.clearToken(); window.PLAuth.goLogin(); throw new Error("Sesión expirada"); }
-    if (res.status === 403) { window.PLAuth.goCourse(); throw new Error("Sin acceso al curso"); }
+    if (res.status === 403) { location.reload(); throw new Error("Acceso no activo"); }
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (_) {}
@@ -442,15 +442,21 @@
   }
 
   // ── account chrome ───────────────────────────────────────────────────────
-  function renderAccount(user) {
+  function renderAccount(st) {
+    const user = st.user || {};
     const info = el("acctInfo");
     if (info) {
-      const label = user.role === "admin" ? "Administrador · Aula" : "Alumno · Aula";
-      info.innerHTML = `<b>${user.name || user.email || ""}</b><span class="exp ok">${label}</span>`;
+      let exp = '<span class="exp ok">Acceso · Aula</span>';
+      if (st.lifetime) exp = '<span class="exp life">Acceso vitalicio</span>';
+      else if (st.access_until) {
+        const d = new Date(st.access_until.replace(" ", "T"));
+        if (!isNaN(d)) exp = `<span class="exp ok">Acceso hasta ${d.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}</span>`;
+      }
+      info.innerHTML = `<b>${user.name || user.email || ""}</b>${exp}`;
     }
     if (user.role === "admin") {
       const al = el("adminLink");
-      if (al) { al.style.display = ""; al.href = (window.PLAuth.AULA.adminUrl || "#"); }
+      if (al) { al.style.display = ""; al.href = "admin.html"; }
     }
     const lo = el("logoutBtn");
     if (lo) lo.addEventListener("click", () => window.PLAuth.logout());
@@ -498,11 +504,11 @@
     switchTo("gamma");
   }
 
-  // Gate the dashboard behind a valid Aula session with quant-course access.
+  // Gate the dashboard: valid Aula session + active quant access (coupon/pago).
   async function boot() {
-    const user = await window.PLAuth.guard();
-    if (!user) return;   // guard already redirected (login) or showed no-access
-    renderAccount(user);
+    const st = await window.PLAuth.guard();
+    if (!st) return;   // guard already redirected (login) or showed the paywall
+    renderAccount(st);
     init();
   }
 

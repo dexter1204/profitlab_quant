@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ProfitLab Quant — Cupones</title>
+<style>
+  :root{--bg:#05070b;--panel:#0b1220;--border:#1f2937;--grid:#111a2b;--muted:#64748b;
+    --text:#e2e8f0;--text-strong:#f8fafc;--green:#22c55e;--green-soft:#4ade80;--red:#ef4444;--red-soft:#f87171;--amber:#f59e0b;--cyan:#06b6d4;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, var(--bg) 60%);
+    color:var(--text);font-family:'Inter',system-ui,sans-serif;padding:14px 18px 50px}
+  .topbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:16px}
+  .brand{font-size:18px;font-weight:700;color:var(--text-strong);letter-spacing:.04em}
+  .brand span{color:var(--green)}
+  .badge{padding:3px 8px;border-radius:4px;font-size:10px;letter-spacing:.14em;font-weight:700;text-transform:uppercase;border:1px solid var(--amber);color:var(--amber);background:rgba(245,158,11,.1)}
+  .spacer{flex:1}
+  .linkbtn{appearance:none;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none}
+  .linkbtn:hover{border-color:var(--muted)}
+  h2{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:24px 0 10px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;overflow-x:auto}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  input,select{background:#070b12;color:var(--text-strong);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-family:inherit;font-size:13px}
+  input:focus,select:focus{outline:none;border-color:var(--green)}
+  button.go{background:var(--green);color:#04120a;border:0;border-radius:8px;padding:9px 16px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:620px}
+  th{text-align:left;color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:9px 10px;border-bottom:1px solid var(--grid);vertical-align:middle}
+  td.code{font-weight:700;letter-spacing:.08em;color:var(--text-strong)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+  .pill.on{background:rgba(34,197,94,.12);color:var(--green-soft)}
+  .pill.off{background:rgba(239,68,68,.12);color:var(--red-soft)}
+  .pill.life{background:rgba(6,182,212,.12);color:var(--cyan)}
+  .mini{appearance:none;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer}
+  .mini:hover{border-color:var(--muted)}
+  .msg{font-size:13px;padding:9px 12px;border-radius:8px;margin-top:10px;display:none}
+  .msg.err{display:block;background:rgba(239,68,68,.1);border:1px solid var(--red);color:var(--red-soft)}
+  .msg.ok{display:block;background:rgba(34,197,94,.1);border:1px solid var(--green);color:var(--green-soft)}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Profit<span>Lab</span> Quant</div>
+    <span class="badge">Cupones</span>
+    <span class="spacer"></span>
+    <button class="linkbtn" onclick="location.href='index.html'">← Dashboard</button>
+    <button class="linkbtn" id="logoutBtn">Cerrar sesión</button>
+  </div>
+
+  <h2>Crear / gestionar cupones</h2>
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label>Código (opcional)</label><input id="cCode" type="text" placeholder="auto" style="width:140px;text-transform:uppercase" /></div>
+      <div class="field"><label>Duración</label>
+        <select id="cDur"><option value="30">30 días</option><option value="90">90 días</option><option value="180">180 días</option><option value="365">1 año</option><option value="0">Vitalicio</option><option value="custom">Personalizado…</option></select>
+      </div>
+      <div class="field" id="cCustomWrap" style="display:none"><label>Días</label><input id="cCustom" type="number" min="1" value="45" style="width:90px" /></div>
+      <div class="field"><label>Usos máximos</label><input id="cMax" type="number" min="1" value="1" style="width:90px" /></div>
+      <div class="field"><label>Nota (opcional)</label><input id="cNote" type="text" placeholder="promo lanzamiento" style="width:180px" /></div>
+      <button class="go" id="cCreate">Crear cupón</button>
+    </div>
+    <div class="msg" id="cMsg"></div>
+    <table style="margin-top:12px">
+      <thead><tr><th>Código</th><th>Duración</th><th>Usos</th><th>Estado</th><th>Nota</th><th></th></tr></thead>
+      <tbody id="cBody"><tr><td colspan="6" class="muted">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Alumnos con acceso</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Nombre</th><th>Email</th><th>Acceso hasta</th><th>Origen</th></tr></thead>
+      <tbody id="sBody"><tr><td colspan="4" class="muted">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script>
+  (function () {
+    const A = window.PLAuth;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+    const msg = (t, k) => { const m = $("cMsg"); m.textContent = t; m.className = "msg " + (k || "err"); if (t) setTimeout(() => m.className = "msg", 4000); };
+    const fmtDate = (s) => { if (!s) return "—"; const d = new Date(String(s).replace(" ", "T")); return isNaN(d) ? s : d.toLocaleDateString("es", { year:"numeric", month:"short", day:"numeric" }); };
+
+    async function loadCoupons() {
+      try {
+        const rows = await A.aula("GET", "/quant/coupons");
+        $("cBody").innerHTML = (rows.length ? rows.map((c) => `
+          <tr><td class="code">${esc(c.code)}</td>
+            <td>${c.lifetime ? "Vitalicio" : c.duration_days + " días"}</td>
+            <td>${c.uses}/${c.max_uses} <span class="muted">(${c.remaining} libres)</span></td>
+            <td><span class="pill ${c.active ? "on" : "off"}">${c.active ? "Activo" : "Inactivo"}</span></td>
+            <td class="muted">${esc(c.note)}</td>
+            <td><button class="mini" data-t="${c.id}">${c.active ? "Desactivar" : "Activar"}</button></td></tr>`).join("")
+          : '<tr><td colspan="6" class="muted">Aún no hay cupones.</td></tr>');
+        for (const b of $("cBody").querySelectorAll("[data-t]"))
+          b.addEventListener("click", async () => { try { await A.aula("POST", `/quant/coupons/${b.dataset.t}/toggle`); loadCoupons(); } catch (e) { msg(e.message); } });
+      } catch (e) { msg(e.message); }
+    }
+
+    async function loadAccess() {
+      try {
+        const rows = await A.aula("GET", "/quant/access");
+        $("sBody").innerHTML = (rows.length ? rows.map((r) => `
+          <tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${fmtDate(r.access_until)}</td>
+            <td><span class="pill ${r.source === "coupon" ? "on" : (r.source === "mercadopago" ? "life" : "")}">${esc(r.source)}</span></td></tr>`).join("")
+          : '<tr><td colspan="4" class="muted">Aún no hay alumnos con acceso.</td></tr>');
+      } catch (e) { /* non-fatal */ }
+    }
+
+    async function createCoupon() {
+      const sel = $("cDur").value;
+      const duration_days = sel === "custom" ? parseInt($("cCustom").value || "0", 10) : parseInt(sel, 10);
+      try {
+        const c = await A.aula("POST", "/quant/coupons", {
+          code: $("cCode").value.trim(), duration_days: isNaN(duration_days) ? 30 : duration_days,
+          max_uses: parseInt($("cMax").value || "1", 10), note: $("cNote").value.trim(),
+        });
+        msg("Cupón creado: " + c.code, "ok"); $("cCode").value = ""; $("cNote").value = "";
+        loadCoupons();
+      } catch (e) { msg(e.message); }
+    }
+
+    // admin-only guard (does NOT paywall — admins manage even without access)
+    (async function () {
+      if (!A.getToken()) { A.goLogin(); return; }
+      let me;
+      try { me = await A.aula("GET", "/quant/me"); }
+      catch (e) { if (e.status === 401) { A.clearToken(); A.goLogin(); } return; }
+      if (!me.user || me.user.role !== "admin") { location.href = "index.html"; return; }
+      $("cDur").addEventListener("change", () => { $("cCustomWrap").style.display = $("cDur").value === "custom" ? "flex" : "none"; });
+      $("cCreate").addEventListener("click", createCoupon);
+      $("logoutBtn").addEventListener("click", () => A.logout());
+      loadCoupons(); loadAccess();
+    })();
+  })();
+  </script>
+</body>
+</html>

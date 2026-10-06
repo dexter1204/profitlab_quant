@@ -1,86 +1,109 @@
-// Auth via SSO with the Profit Lab Aula Virtual.
-// The Aula stores its JWT in localStorage['pl_token'] on the same origin
-// (profitlab-academy.com), so the quant dashboard reuses it directly — no
-// separate login. Access is granted to users enrolled in the ProfitLab Quant
-// course (enforced by the backend /api/access + gated data endpoints).
+// Access control via the Aula Virtual (shared pl_token on the same domain).
+// Gate = quant access, granted by a COUPON or a PAYMENT, both handled by the
+// Aula PHP API. If the user has no access, we show a paywall: redeem a coupon,
+// or pay (Mercado Pago) to unlock the dashboard.
 
 (function () {
-  const API = (window.PROFITLAB_API || "").replace(/\/+$/, "");
   const AULA = window.PROFITLAB_AULA || {};
+  const API_BASE = (AULA.apiBase || "/aulavirtual/api").replace(/\/+$/, "");
   const KEY = "pl_token";   // SAME key the Aula frontend uses
 
   const getToken = () => { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } };
   const clearToken = () => { try { localStorage.removeItem(KEY); } catch (_) {} };
+  const goLogin = () => { location.href = AULA.loginUrl || "/"; };
+  function logout() { clearToken(); location.href = AULA.homeUrl || AULA.loginUrl || "/"; }
 
-  function authHeaders(extra) {
-    const h = Object.assign({}, extra || {});
+  function headers(extra) {
+    const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
     const t = getToken();
     if (t) h["Authorization"] = "Bearer " + t;
     return h;
   }
-
-  const goLogin = () => { location.href = AULA.loginUrl || "/"; };
-  const goCourse = () => { location.href = AULA.courseUrl || AULA.homeUrl || "/"; };
-  function logout() { clearToken(); location.href = AULA.homeUrl || AULA.loginUrl || "/"; }
-
-  // Returns { authenticated, has_access, user } from the quant backend,
-  // which delegates to the Aula API. Throws on network/unexpected errors.
-  async function accessStatus() {
-    if (!API) throw new Error("API no configurada (config.js).");
-    const res = await fetch(`${API}/api/access`, { headers: authHeaders() });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (_) {}
-      const e = new Error(detail); e.status = res.status; throw e;
-    }
-    return res.json();
+  async function aula(method, path, body) {
+    const opts = { method, headers: headers() };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const res = await fetch(`${API_BASE}${path}`, opts);
+    let data = null; try { data = await res.json(); } catch (_) {}
+    if (!res.ok) { const e = new Error((data && data.detail) || (data && data.error) || `HTTP ${res.status}`); e.status = res.status; throw e; }
+    return data;
   }
 
-  // Full-screen "no access" overlay with a path to get the course.
-  function showNoAccess(user) {
-    const name = (user && user.name) ? user.name : "";
+  const money = (v, cur) => {
+    const n = Number(v);
+    if (!isFinite(n)) return "";
+    return (cur === "USD" ? "$" : (cur ? cur + " " : "")) + n.toLocaleString("es", { maximumFractionDigits: 2 });
+  };
+
+  // ── paywall (no access): redeem coupon or pay ────────────────────────────
+  function showPaywall(st) {
+    const name = (st.user && st.user.name) ? st.user.name : "";
+    const priceTxt = money(st.price, st.currency);
+    const daysTxt = st.days > 0 ? `${st.days} días` : "acceso vitalicio";
     const wrap = document.createElement("div");
-    wrap.id = "pl-noaccess";
+    wrap.id = "pl-paywall";
     wrap.style.cssText =
       "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;" +
       "background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, #05070b 60%);" +
       "font-family:'Inter',system-ui,sans-serif;color:#e2e8f0;padding:24px";
     wrap.innerHTML = `
-      <div style="max-width:420px;text-align:center;background:#0b1220;border:1px solid #1f2937;
-        border-radius:16px;padding:30px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
-        <div style="font-size:20px;font-weight:700;color:#f8fafc;letter-spacing:.04em">
+      <div style="width:100%;max-width:420px;background:#0b1220;border:1px solid #1f2937;
+        border-radius:16px;padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
+        <div style="font-size:20px;font-weight:700;color:#f8fafc;letter-spacing:.04em;text-align:center">
           Profit<span style="color:#22c55e">Lab</span> Quant</div>
-        <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:18px 0 22px">
-          ${name ? "Hola <b style='color:#e2e8f0'>" + name + "</b>. " : ""}Tu cuenta del Aula no tiene acceso al
-          <b style="color:#e2e8f0">dashboard ProfitLab Quant</b>. Adquiere o activa el curso para entrar.</p>
-        <a href="${AULA.courseUrl || AULA.homeUrl || '#'}" style="display:inline-block;background:#22c55e;color:#04120a;
-          text-decoration:none;border-radius:9px;padding:12px 20px;font-weight:700;font-size:14px">Ver el curso</a>
-        <div style="margin-top:16px"><a id="pl-logout" style="color:#64748b;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
+        <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:16px 0 20px;text-align:center">
+          ${name ? "Hola <b style='color:#e2e8f0'>" + name + "</b>. " : ""}Activa tu acceso al dashboard.</p>
+
+        <label style="display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:6px">Tengo un cupón</label>
+        <div style="display:flex;gap:8px">
+          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;background:#070b12;color:#f8fafc;border:1px solid #1f2937;border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
+          <button id="pl-redeem" style="background:#22c55e;color:#04120a;border:0;border-radius:9px;padding:0 16px;font-family:inherit;font-weight:700;cursor:pointer">Canjear</button>
+        </div>
+        <div id="pl-msg" style="font-size:13px;margin-top:10px;min-height:16px;color:#f87171"></div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#475569;font-size:11px">
+          <span style="flex:1;height:1px;background:#1f2937"></span>O<span style="flex:1;height:1px;background:#1f2937"></span>
+        </div>
+
+        <button id="pl-pay" style="width:100%;background:#0b1220;border:1px solid #22c55e;color:#4ade80;border-radius:9px;padding:13px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
+          Comprar acceso — ${priceTxt} · ${daysTxt}</button>
+        <div style="text-align:center;margin-top:16px"><a id="pl-logout" style="color:#64748b;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
       </div>`;
     document.body.innerHTML = "";
     document.body.appendChild(wrap);
-    const lo = document.getElementById("pl-logout");
-    if (lo) lo.addEventListener("click", logout);
+
+    const msg = (t, ok) => { const m = document.getElementById("pl-msg"); m.textContent = t || ""; m.style.color = ok ? "#4ade80" : "#f87171"; };
+    document.getElementById("pl-logout").addEventListener("click", logout);
+    document.getElementById("pl-redeem").addEventListener("click", async () => {
+      const code = (document.getElementById("pl-code").value || "").trim().toUpperCase();
+      if (!code) { msg("Ingresa tu cupón."); return; }
+      try { await aula("POST", "/quant/redeem", { code }); msg("¡Acceso activado! Entrando…", true); setTimeout(() => location.reload(), 700); }
+      catch (e) { msg(e.message || "No se pudo canjear."); }
+    });
+    document.getElementById("pl-code").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("pl-redeem").click(); });
+    document.getElementById("pl-pay").addEventListener("click", async () => {
+      msg("Abriendo el pago…", true);
+      try { const d = await aula("POST", "/quant/checkout", {}); if (d && d.init_point) location.href = d.init_point; else msg("No se pudo iniciar el pago."); }
+      catch (e) { msg(e.message || "No se pudo iniciar el pago."); }
+    });
   }
 
-  // Gate a page. Resolves with the user when access is granted; otherwise
-  // redirects (to Aula login) or renders the no-access screen and resolves null.
+  // Gate a page. Resolves with the user when access is active; otherwise
+  // redirects to the Aula login or renders the paywall and resolves null.
   async function guard() {
     if (!getToken()) { goLogin(); return null; }
     let st;
-    try {
-      st = await accessStatus();
-    } catch (e) {
-      if (e.status === 503) { document.body.innerHTML =
-        '<div style="color:#f87171;font-family:system-ui;padding:40px">No se pudo contactar el Aula Virtual. Intenta de nuevo en un momento.</div>';
-        return null;
-      }
-      goLogin(); return null;
+    try { st = await aula("GET", "/quant/me"); }
+    catch (e) {
+      if (e.status === 401) { clearToken(); goLogin(); return null; }
+      document.body.innerHTML = '<div style="color:#f87171;font-family:system-ui;padding:40px">No se pudo contactar el Aula Virtual. Intenta de nuevo en un momento.</div>';
+      return null;
     }
-    if (!st.authenticated) { clearToken(); goLogin(); return null; }
-    if (!st.has_access) { showNoAccess(st.user); return null; }
-    return st.user;
+    if (!st.has_access) { showPaywall(st); return null; }
+    return st;   // { user, has_access, access_until, lifetime, price, currency, days }
   }
 
-  window.PLAuth = { API, AULA, getToken, clearToken, authHeaders, accessStatus, guard, logout, goLogin, goCourse };
+  window.PLAuth = {
+    AULA, API_BASE, getToken, clearToken, headers, authHeaders: headers,
+    aula, guard, logout, goLogin, showPaywall,
+  };
 })();

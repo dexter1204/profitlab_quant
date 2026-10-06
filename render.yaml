@@ -17,10 +17,6 @@ services:
         sync: false        # set this secret in the Render dashboard, not in git
       - key: ALLOWED_ORIGINS
         value: https://profitlab-academy.com
-      # ── SSO with the Aula Virtual ──
+      # ── access via the Aula Virtual (coupon / payment) ──
       - key: AULA_API_BASE
         value: https://profitlab-academy.com/aulavirtual/api
-      - key: QUANT_COURSE_TITLE
-        value: ProfitLab Quant     # access = enrollment in this Aula course
-      - key: QUANT_COURSE_ID
-        sync: false                # optional: exact course id (most precise)

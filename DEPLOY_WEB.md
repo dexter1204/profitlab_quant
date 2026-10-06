@@ -23,44 +23,47 @@ system is split in two:
 
 Do these in order: **backend first** (you need its URL), then the frontend.
 
-### Accounts, coupons & admin
+### Accounts, coupons & payment
 
-The dashboard reuses the **Aula Virtual** accounts (single sign-on). Students
-log in once in the Aula (`profitlab-academy.com/aulavirtual`); because the Aula
-and the quant live on the **same domain**, they share the `pl_token` session.
-Access to the dashboard = being **enrolled in the "ProfitLab Quant" course** in
-the Aula (or being an Aula admin). You manage who gets in from the Aula's own
-**Master Study** panel (enroll / remove students, charge via Mercado Pago) —
-there is no separate login or admin panel here.
+The dashboard reuses the **Aula Virtual** accounts and its MySQL database.
+Students log in once in the Aula (`profitlab-academy.com/aulavirtual`); because
+the Aula and the quant live on the **same domain**, they share the `pl_token`
+session. Access to the dashboard is granted by a **coupon** or a **payment**
+(Mercado Pago), both handled by the Aula's PHP API against its own database.
 
 How it works:
 1. Visitor opens `/quantsistem/` → the frontend reads the Aula's `pl_token`.
-2. No token → redirected to the Aula login. Signed in → the quant backend
-   calls the Aula API (`/auth/me` + `/enrollments/me`) to confirm the session
-   and the ProfitLab Quant enrollment.
-3. Enrolled (or admin) → dashboard loads. Not enrolled → a "get the course"
-   screen linking to the Aula.
+   No token → redirected to the Aula login.
+2. The frontend asks the Aula `GET /api/quant/me`. If the user has active
+   access → dashboard loads.
+3. If not → a **paywall**: redeem a coupon, or **pay** to unlock (opens
+   Mercado Pago; on approval the Aula webhook grants access automatically).
+4. You create coupons and see who has access from the quant **admin page**
+   (`/quantsistem/admin.html`, visible only to Aula admins), which talks to the
+   Aula API.
 
-The quant backend keeps **no users and no database** — it delegates to the
-Aula API over HTTPS. Nothing about SiteGround's remote-MySQL limitation
-applies, because Render never connects to MySQL.
+The quant backend (Render) keeps **no users and no database** — on each data
+request it asks the Aula `GET /api/quant/me` whether the caller has access, so
+Render never connects to MySQL (no remote-MySQL headache). The coupon/access
+data lives in **your Aula's database**.
 
-**One-time setup in the Aula:** create a course titled exactly
-**`ProfitLab Quant`** (Master Study → Cursos → nuevo), set its access to
-*inscripción* so only you enroll students, and enroll (or sell) the dashboard
-to your clients there.
+**One-time setup in the Aula** (this repo ships the PHP changes in
+`aulavirtual---profitlab`):
+1. In phpMyAdmin of your Aula database, run **`api/migracion_quant.sql`**
+   (creates `quant_access`, `quant_coupons`, `quant_redemptions`).
+2. In `api/config.php` add the quant settings (price / currency / days —
+   all editable): e.g. `'quant_price' => 75, 'quant_currency' => 'USD',
+   'quant_days' => 30`. Make sure `mp_access_token` is set for payments.
+3. Upload the updated `api/` to `public_html/api/`.
 
-Extra backend env vars (set in Render → Environment):
+Quant backend env var (set in Render → Environment):
 
 | Key | Value |
 |---|---|
 | `AULA_API_BASE` | `https://profitlab-academy.com/aulavirtual/api` |
-| `QUANT_COURSE_TITLE` | `ProfitLab Quant` (the course that grants access) |
-| `QUANT_COURSE_ID` | *(optional)* the exact course id, for precise matching |
 
 Front-end URLs live in `web/config.js` under `window.PROFITLAB_AULA`
-(`loginUrl`, `courseUrl`, `adminUrl`, `homeUrl`) — adjust if your Aula paths
-differ.
+(`apiBase`, `loginUrl`, `homeUrl`) — adjust if your Aula paths differ.
 
 ### Views / API endpoints
 
@@ -129,7 +132,7 @@ a symbol, the Chart tab still shows the GEX profile and levels.
    Use the exact URL from Part 1, **no trailing slash**.
 2. Upload **all of `web/`** (the files, not the folder itself) to SiteGround so
    they land in `public_html/quantsistem/`:
-   - `index.html`
+   - `index.html` · `admin.html`
    - `config.js` · `auth.js` · `universe.js` · `app.js`
    - `plotly.min.js` (the charting library, served locally — no CDN)
 
