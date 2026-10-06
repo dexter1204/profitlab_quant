@@ -71,7 +71,7 @@
     if (!API) throw new Error("API no configurada. Edita config.js con la URL de tu backend (Render).");
     const res = await fetch(`${API}${path}`, { headers: window.PLAuth.authHeaders() });
     if (res.status === 401) { window.PLAuth.clearToken(); window.PLAuth.goLogin(); throw new Error("Sesión expirada"); }
-    if (res.status === 403) { window.PLAuth.goLogin(); throw new Error("Acceso no activo"); }
+    if (res.status === 403) { window.PLAuth.goCourse(); throw new Error("Sin acceso al curso"); }
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (_) {}
@@ -445,15 +445,13 @@
   function renderAccount(user) {
     const info = el("acctInfo");
     if (info) {
-      let exp = "";
-      if (user.lifetime) exp = '<span class="exp life">Acceso vitalicio</span>';
-      else if (user.access_until) {
-        const d = new Date(user.access_until);
-        exp = `<span class="exp ok">Acceso hasta ${d.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}</span>`;
-      }
-      info.innerHTML = `<b>${user.name || user.email}</b>${exp}`;
+      const label = user.role === "admin" ? "Administrador · Aula" : "Alumno · Aula";
+      info.innerHTML = `<b>${user.name || user.email || ""}</b><span class="exp ok">${label}</span>`;
     }
-    if (user.is_admin) el("adminLink").style.display = "";
+    if (user.role === "admin") {
+      const al = el("adminLink");
+      if (al) { al.style.display = ""; al.href = (window.PLAuth.AULA.adminUrl || "#"); }
+    }
     const lo = el("logoutBtn");
     if (lo) lo.addEventListener("click", () => window.PLAuth.logout());
   }
@@ -500,11 +498,10 @@
     switchTo("gamma");
   }
 
-  // Gate the dashboard behind a valid, access-active session before booting.
+  // Gate the dashboard behind a valid Aula session with quant-course access.
   async function boot() {
     const user = await window.PLAuth.guard();
-    if (!user) return;                       // guard redirected to login
-    if (!user.has_access) { window.PLAuth.goLogin(); return; }  // needs coupon
+    if (!user) return;   // guard already redirected (login) or showed no-access
     renderAccount(user);
     init();
   }

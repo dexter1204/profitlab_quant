@@ -6,7 +6,5 @@ requests>=2.31
 yfinance>=0.2.40
 fastapi>=0.110
 uvicorn[standard]>=0.29
-# accounts / coupons / admin (password hashing + JWT use the stdlib)
-sqlalchemy>=2.0
-pymysql>=1.1            # MySQL driver (SiteGround etc.)
-psycopg2-binary>=2.9   # Postgres driver (Neon / Supabase / RDS) — optional
+# auth is delegated to the Aula Virtual API over HTTPS (requests, above) —
+# no database or ORM needed here.

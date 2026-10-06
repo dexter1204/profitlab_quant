@@ -30,13 +30,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fastapi import Depends  # noqa: E402
+from fastapi import Depends, Header  # noqa: E402
 
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
 
-from . import auth as auth_mod, db as db_mod  # noqa: E402
-from .auth import require_access  # noqa: E402
+from . import aula  # noqa: E402  — SSO with the Aula Virtual
+from .aula import require_access  # noqa: E402
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
 
@@ -50,23 +50,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# accounts / coupons / admin
-app.include_router(auth_mod.auth_router)
-app.include_router(auth_mod.coupon_router)
-app.include_router(auth_mod.admin_router)
+
+@app.get("/api/access")
+def access(authorization: str = Header(None)):
+    """Reports the Aula session + quant-course access so the frontend can
+    route the visitor (login / enroll / dashboard)."""
+    return aula.access_status(authorization)
 
 
-@app.on_event("startup")
-def _startup():
-    db_mod.init_db()
-    auth_mod.ensure_admin()
-
-
-# Every market-data endpoint requires an active (non-expired) account.
+# Every market-data endpoint requires a valid Aula session enrolled in the
+# ProfitLab Quant course (or an Aula admin).
 GATED = [Depends(require_access)]
 
 

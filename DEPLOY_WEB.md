@@ -25,49 +25,42 @@ Do these in order: **backend first** (you need its URL), then the frontend.
 
 ### Accounts, coupons & admin
 
-The dashboard is gated: students register (email + password), redeem a
-**coupon** to activate access, and only then see the charts. You manage
-everyone from an **admin panel**.
+The dashboard reuses the **Aula Virtual** accounts (single sign-on). Students
+log in once in the Aula (`profitlab-academy.com/aulavirtual`); because the Aula
+and the quant live on the **same domain**, they share the `pl_token` session.
+Access to the dashboard = being **enrolled in the "ProfitLab Quant" course** in
+the Aula (or being an Aula admin). You manage who gets in from the Aula's own
+**Master Study** panel (enroll / remove students, charge via Mercado Pago) —
+there is no separate login or admin panel here.
 
-Pages (all under `/quantsistem/`):
-- `login.html` — login / register + coupon redemption. Students land here.
-- `index.html` — the dashboard (redirects to login if not signed in / no access).
-- `admin.html` — your admin panel (students + coupons). Admin accounts only.
+How it works:
+1. Visitor opens `/quantsistem/` → the frontend reads the Aula's `pl_token`.
+2. No token → redirected to the Aula login. Signed in → the quant backend
+   calls the Aula API (`/auth/me` + `/enrollments/me`) to confirm the session
+   and the ProfitLab Quant enrollment.
+3. Enrolled (or admin) → dashboard loads. Not enrolled → a "get the course"
+   screen linking to the Aula.
+
+The quant backend keeps **no users and no database** — it delegates to the
+Aula API over HTTPS. Nothing about SiteGround's remote-MySQL limitation
+applies, because Render never connects to MySQL.
+
+**One-time setup in the Aula:** create a course titled exactly
+**`ProfitLab Quant`** (Master Study → Cursos → nuevo), set its access to
+*inscripción* so only you enroll students, and enroll (or sell) the dashboard
+to your clients there.
 
 Extra backend env vars (set in Render → Environment):
 
 | Key | Value |
 |---|---|
-| `DATABASE_URL` | connection string to your database (see **Database** below) |
-| `JWT_SECRET` | a long random string (Render can generate it) |
-| `ADMIN_EMAIL` | the email you'll log in with as admin |
-| `ADMIN_PASSWORD` | your admin password (the admin account is created on boot) |
+| `AULA_API_BASE` | `https://profitlab-academy.com/aulavirtual/api` |
+| `QUANT_COURSE_TITLE` | `ProfitLab Quant` (the course that grants access) |
+| `QUANT_COURSE_ID` | *(optional)* the exact course id, for precise matching |
 
-Passwords are stored hashed (PBKDF2-SHA256); sessions use signed JWT tokens
-sent in the `Authorization` header. The Polygon key and the DB credentials
-live only on the server.
-
-### Database
-
-Needs a **persistent** database the Render backend can reach. The code is
-database-agnostic (SQLAlchemy) — just set `DATABASE_URL`:
-
-- **MySQL** (SiteGround / any): `mysql+pymysql://user:password@host:3306/dbname`
-- **Postgres** (Neon / Supabase / RDS): `postgresql+psycopg2://user:password@host:5432/dbname`
-
-> ⚠️ **SiteGround MySQL + Render — read this.** SiteGround's MySQL only
-> accepts **remote** connections if you enable them: Site Tools → **MySQL →
-> Remote** and add an access host. Render's free plan uses **dynamic
-> outbound IPs**, so pinning a single IP won't hold. Options:
-> 1. Add `%` as the remote host (allows any IP — the DB is still protected by
->    user/password). Use a strong password. Simplest path if SiteGround
->    accepts `%`.
-> 2. Upgrade Render to a plan with a **static outbound IP** and whitelist it.
-> 3. If neither works, use a free cloud Postgres (**Neon** — neon.tech) and
->    just change `DATABASE_URL`. Nothing else changes.
->
-> Tables (`users`, `coupons`, `redemptions`) are created automatically on
-> first boot — you don't run any SQL.
+Front-end URLs live in `web/config.js` under `window.PROFITLAB_AULA`
+(`loginUrl`, `courseUrl`, `adminUrl`, `homeUrl`) — adjust if your Aula paths
+differ.
 
 ### Views / API endpoints
 
@@ -82,9 +75,10 @@ The frontend has five tabs, each backed by one endpoint:
 | Delta Surface | `GET /api/delta_surface/{ticker}` | 3-D B-S delta across spot × time-to-expiry (call/put toggle) |
 | Net Drift | `GET /api/net_drift/{ticker}` | dealer net dollar-delta profile across a ±5% spot range |
 | Volatility | `GET /api/vol_drift/{ticker}`, `GET /api/vol_surface/{ticker}` | IV term structure (ATM/call/put by DTE) + 3-D IV surface (toggle) |
-| Market Heatmap | `GET /api/market` | sector treemap colored by day change + breadth summary |
 
-(`GET /api/iv/{ticker}` is also available for IV-vs-realized premium.)
+(`GET /api/iv/{ticker}` is also available for IV-vs-realized premium.
+`GET /api/access` reports the Aula session + course access. All data
+endpoints require a valid Aula token enrolled in the ProfitLab Quant course.)
 Intraday candles are best-effort — if the vendor/plan doesn't serve them for
 a symbol, the Chart tab still shows the GEX profile and levels.
 
@@ -135,7 +129,7 @@ a symbol, the Chart tab still shows the GEX profile and levels.
    Use the exact URL from Part 1, **no trailing slash**.
 2. Upload **all of `web/`** (the files, not the folder itself) to SiteGround so
    they land in `public_html/quantsistem/`:
-   - `index.html` · `login.html` · `admin.html`
+   - `index.html`
    - `config.js` · `auth.js` · `universe.js` · `app.js`
    - `plotly.min.js` (the charting library, served locally — no CDN)
 
