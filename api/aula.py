@@ -27,33 +27,53 @@ AULA_API_BASE = os.environ.get(
 _TTL = float(os.environ.get("AULA_CACHE_TTL", "60"))
 _TIMEOUT = float(os.environ.get("AULA_TIMEOUT", "8"))
 
+# A browser-like User-Agent — some shared hosts (SiteGround) block the default
+# "python-requests" UA with an anti-bot HTML page, which isn't JSON.
+_UA = os.environ.get(
+    "AULA_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36 ProfitLabQuant/1.0",
+)
+
 _cache: dict[str, tuple[float, dict]] = {}
 
 
 def resolve_access(token: str) -> dict:
     """Ask the Aula whether this token's user has quant access. Cached per
-    token for _TTL seconds. `error` is set only on network failure."""
+    token for _TTL seconds. Never raises; `error`/`detail` describe failures so
+    the caller can return a clean response (with CORS headers)."""
     now = time.time()
     hit = _cache.get(token)
     if hit and now - hit[0] < _TTL:
         return hit[1]
+
+    url = f"{AULA_API_BASE}/quant/me"
     try:
         r = requests.get(
-            f"{AULA_API_BASE}/quant/me",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": _UA},
             timeout=_TIMEOUT,
         )
-    except requests.RequestException:
-        return {"authenticated": False, "has_access": False, "user": None, "error": "aula_unreachable"}
+    except requests.RequestException as e:
+        return {"authenticated": False, "has_access": False, "user": None,
+                "error": "aula_unreachable", "detail": f"{url}: {e}"}
 
     if r.status_code == 401:
         dec = {"authenticated": False, "has_access": False, "user": None, "error": None}
         _cache[token] = (now, dec)
         return dec
     if not r.ok:
-        return {"authenticated": False, "has_access": False, "user": None, "error": "aula_error"}
+        return {"authenticated": False, "has_access": False, "user": None,
+                "error": "aula_error", "detail": f"HTTP {r.status_code} from {url}: {r.text[:160]}"}
 
-    d = r.json() or {}
+    try:
+        d = r.json() or {}
+    except ValueError:
+        # 2xx but the body isn't JSON (anti-bot HTML page, redirect, wrong path…)
+        return {"authenticated": False, "has_access": False, "user": None,
+                "error": "aula_badjson",
+                "detail": f"Respuesta no-JSON de {url} (HTTP {r.status_code}): {r.text[:160]!r}"}
+
     dec = {
         "authenticated": True,
         "has_access": bool(d.get("has_access")),
@@ -77,8 +97,9 @@ def require_access(authorization: str = Header(None)):
     if not tok:
         raise HTTPException(status_code=401, detail="No autenticado")
     dec = resolve_access(tok)
-    if dec.get("error") == "aula_unreachable":
-        raise HTTPException(status_code=503, detail="No se pudo contactar el Aula Virtual")
+    if dec.get("error") in ("aula_unreachable", "aula_error", "aula_badjson"):
+        raise HTTPException(status_code=503,
+                            detail=dec.get("detail") or "No se pudo verificar el acceso con el Aula Virtual")
     if not dec["authenticated"]:
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
     if not dec["has_access"]:
