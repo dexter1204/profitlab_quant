@@ -20,3 +20,7 @@ services:
       # ── access via the Aula Virtual (coupon / payment) ──
       - key: AULA_API_BASE
         value: https://profitlab-academy.com/aulavirtual/api
+      - key: JWT_SECRET
+        sync: false        # = the 'jwt_secret' from your Aula's api/config.php
+                           # (lets the backend validate sessions locally; the
+                           #  Aula API is blocked server-side by SiteGround)
