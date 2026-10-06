@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ProfitLab Quant — Acceso</title>
+<style>
+  :root{
+    --bg:#05070b; --panel:#0b1220; --border:#1f2937; --muted:#64748b;
+    --text:#e2e8f0; --text-strong:#f8fafc; --green:#22c55e; --green-soft:#4ade80;
+    --red:#ef4444; --red-soft:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, var(--bg) 60%);
+    color:var(--text); font-family:'Inter',system-ui,sans-serif; padding:24px}
+  .card{width:100%; max-width:400px; background:var(--panel); border:1px solid var(--border);
+    border-radius:16px; padding:28px 26px; box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .brand{font-size:22px; font-weight:700; color:var(--text-strong); letter-spacing:.04em; text-align:center}
+  .brand span{color:var(--green)}
+  .sub{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+    text-align:center; margin-top:4px; font-weight:600}
+  .tabs{display:flex; gap:4px; margin:22px 0 18px; border-bottom:1px solid var(--border)}
+  .tab{flex:1; appearance:none; background:transparent; border:0; color:var(--muted);
+    font-family:inherit; font-size:13px; font-weight:600; padding:9px 0; cursor:pointer;
+    border-bottom:2px solid transparent; margin-bottom:-1px}
+  .tab.active{color:var(--text-strong); border-bottom-color:var(--green)}
+  label{display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); font-weight:700; margin:12px 0 5px}
+  input{width:100%; background:#070b12; color:var(--text-strong); border:1px solid var(--border);
+    border-radius:9px; padding:11px 13px; font-family:inherit; font-size:14px}
+  input:focus{outline:none; border-color:var(--green)}
+  button.primary{width:100%; margin-top:18px; background:var(--green); color:#04120a;
+    border:0; border-radius:9px; padding:12px; font-family:inherit; font-size:14px; font-weight:700;
+    cursor:pointer; letter-spacing:.02em}
+  button.primary:hover{background:var(--green-soft)}
+  button.primary:disabled{opacity:.6; cursor:default}
+  .msg{margin-top:14px; font-size:13px; padding:10px 12px; border-radius:8px; display:none}
+  .msg.err{display:block; background:rgba(239,68,68,.1); border:1px solid var(--red); color:var(--red-soft)}
+  .msg.ok{display:block; background:rgba(34,197,94,.1); border:1px solid var(--green); color:var(--green-soft)}
+  .hint{color:var(--muted); font-size:12px; text-align:center; margin-top:16px}
+  .hint a{color:var(--green-soft); cursor:pointer; text-decoration:none}
+  .hidden{display:none !important}
+  .redeem-note{color:var(--muted); font-size:13px; line-height:1.5; margin-bottom:6px}
+  .code-input{text-transform:uppercase; letter-spacing:.12em; font-weight:700; text-align:center}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Profit<span>Lab</span> Quant</div>
+    <div class="sub">Gamma &amp; Beta Exposure</div>
+
+    <!-- auth (login / register) -->
+    <div id="authBox">
+      <div class="tabs">
+        <button class="tab active" data-mode="login">Iniciar sesión</button>
+        <button class="tab" data-mode="register">Crear cuenta</button>
+      </div>
+
+      <div id="nameRow" class="hidden">
+        <label for="name">Nombre</label>
+        <input id="name" type="text" autocomplete="name" placeholder="Tu nombre" />
+      </div>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="email" placeholder="tucorreo@ejemplo.com" />
+      <label for="password">Contraseña</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+
+      <button class="primary" id="submitBtn">Entrar</button>
+      <div class="msg" id="authMsg"></div>
+    </div>
+
+    <!-- redeem (shown when account has no active access) -->
+    <div id="redeemBox" class="hidden">
+      <p class="redeem-note">Tu cuenta aún no tiene acceso activo. Ingresa tu <b>cupón</b> para activarlo.</p>
+      <label for="code">Cupón</label>
+      <input id="code" class="code-input" type="text" placeholder="ABCD123456" />
+      <button class="primary" id="redeemBtn">Canjear cupón</button>
+      <div class="msg" id="redeemMsg"></div>
+      <div class="hint"><a id="logoutLink">Cerrar sesión</a></div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script>
+  (function () {
+    const A = window.PLAuth;
+    const $ = (id) => document.getElementById(id);
+    let mode = "login";
+
+    function showAuthMsg(text, kind) { const m=$("authMsg"); m.textContent=text; m.className="msg "+(kind||"err"); }
+    function showRedeemMsg(text, kind) { const m=$("redeemMsg"); m.textContent=text; m.className="msg "+(kind||"err"); }
+
+    // if already signed in, skip straight ahead
+    if (A.getToken()) {
+      A.apiGet("/api/auth/me").then((d) => {
+        if (d.user.has_access) A.goApp(); else showRedeem();
+      }).catch(() => A.clearToken());
+    }
+
+    for (const t of document.querySelectorAll(".tab")) {
+      t.addEventListener("click", () => {
+        mode = t.dataset.mode;
+        for (const x of document.querySelectorAll(".tab")) x.classList.toggle("active", x === t);
+        $("nameRow").classList.toggle("hidden", mode !== "register");
+        $("submitBtn").textContent = mode === "register" ? "Crear cuenta" : "Entrar";
+        $("authMsg").className = "msg";
+      });
+    }
+
+    async function submitAuth() {
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      if (!email || !password) { showAuthMsg("Completa email y contraseña."); return; }
+      $("submitBtn").disabled = true;
+      try {
+        const path = mode === "register" ? "/api/auth/register" : "/api/auth/login";
+        const body = mode === "register"
+          ? { email, password, name: $("name").value.trim() }
+          : { email, password };
+        const d = await A.apiPost(path, body);
+        A.setToken(d.token);
+        if (d.user.has_access) A.goApp(); else showRedeem();
+      } catch (e) {
+        showAuthMsg(e.message || "Error de acceso.");
+      } finally {
+        $("submitBtn").disabled = false;
+      }
+    }
+
+    function showRedeem() {
+      $("authBox").classList.add("hidden");
+      $("redeemBox").classList.remove("hidden");
+    }
+
+    async function submitRedeem() {
+      const code = $("code").value.trim().toUpperCase();
+      if (!code) { showRedeemMsg("Ingresa tu cupón."); return; }
+      $("redeemBtn").disabled = true;
+      try {
+        await A.apiPost("/api/coupons/redeem", { code });
+        showRedeemMsg("¡Acceso activado! Entrando…", "ok");
+        setTimeout(A.goApp, 700);
+      } catch (e) {
+        showRedeemMsg(e.message || "No se pudo canjear.");
+      } finally {
+        $("redeemBtn").disabled = false;
+      }
+    }
+
+    $("submitBtn").addEventListener("click", submitAuth);
+    $("redeemBtn").addEventListener("click", submitRedeem);
+    $("logoutLink").addEventListener("click", () => A.logout());
+    $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAuth(); });
+    $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") submitRedeem(); });
+  })();
+  </script>
+</body>
+</html>

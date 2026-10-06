@@ -10,3 +10,7 @@ venv/
 .env
 *.egg-info/
 .DS_Store
+
+# local sqlite dev db
+profitlab.db
+*.sqlite3

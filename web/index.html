@@ -46,6 +46,16 @@
   .tab:hover{color:var(--text)}
   .tab.active{color:var(--text-strong); border-bottom-color:var(--green)}
 
+  .spacer{flex:1}
+  .acct{color:var(--muted); font-size:11px; letter-spacing:.04em; display:flex; flex-direction:column; align-items:flex-end; line-height:1.3}
+  .acct b{color:var(--text-strong); font-weight:600}
+  .acct .exp{font-size:10px; letter-spacing:.1em; text-transform:uppercase}
+  .acct .exp.ok{color:var(--green-soft)} .acct .exp.life{color:var(--cyan)}
+  .navlink{appearance:none; background:transparent; border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:7px 11px; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none}
+  .navlink:hover{border-color:var(--muted)}
+  .navlink.admin{border-color:rgba(245,158,11,.4); color:var(--amber)}
+
   .ribbon{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
     gap:1px; background:var(--border); border:1px solid var(--border);
     border-radius:10px; overflow:hidden; margin-bottom:14px}
@@ -99,6 +109,10 @@
       <select id="ticker" aria-label="ticker"></select>
     </div>
     <span class="badge live" id="statusBadge">● LIVE</span>
+    <span class="spacer"></span>
+    <span class="acct" id="acctInfo"></span>
+    <a class="navlink admin" id="adminLink" href="admin.html" style="display:none">Admin</a>
+    <button class="navlink" id="logoutBtn">Salir</button>
   </div>
 
   <div class="title">
@@ -192,6 +206,7 @@
   </section>
 
   <script src="config.js"></script>
+  <script src="auth.js"></script>
   <script src="universe.js"></script>
   <script src="app.js"></script>
 </body>

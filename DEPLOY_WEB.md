@@ -23,6 +23,52 @@ system is split in two:
 
 Do these in order: **backend first** (you need its URL), then the frontend.
 
+### Accounts, coupons & admin
+
+The dashboard is gated: students register (email + password), redeem a
+**coupon** to activate access, and only then see the charts. You manage
+everyone from an **admin panel**.
+
+Pages (all under `/quantsistem/`):
+- `login.html` — login / register + coupon redemption. Students land here.
+- `index.html` — the dashboard (redirects to login if not signed in / no access).
+- `admin.html` — your admin panel (students + coupons). Admin accounts only.
+
+Extra backend env vars (set in Render → Environment):
+
+| Key | Value |
+|---|---|
+| `DATABASE_URL` | connection string to your database (see **Database** below) |
+| `JWT_SECRET` | a long random string (Render can generate it) |
+| `ADMIN_EMAIL` | the email you'll log in with as admin |
+| `ADMIN_PASSWORD` | your admin password (the admin account is created on boot) |
+
+Passwords are stored hashed (PBKDF2-SHA256); sessions use signed JWT tokens
+sent in the `Authorization` header. The Polygon key and the DB credentials
+live only on the server.
+
+### Database
+
+Needs a **persistent** database the Render backend can reach. The code is
+database-agnostic (SQLAlchemy) — just set `DATABASE_URL`:
+
+- **MySQL** (SiteGround / any): `mysql+pymysql://user:password@host:3306/dbname`
+- **Postgres** (Neon / Supabase / RDS): `postgresql+psycopg2://user:password@host:5432/dbname`
+
+> ⚠️ **SiteGround MySQL + Render — read this.** SiteGround's MySQL only
+> accepts **remote** connections if you enable them: Site Tools → **MySQL →
+> Remote** and add an access host. Render's free plan uses **dynamic
+> outbound IPs**, so pinning a single IP won't hold. Options:
+> 1. Add `%` as the remote host (allows any IP — the DB is still protected by
+>    user/password). Use a strong password. Simplest path if SiteGround
+>    accepts `%`.
+> 2. Upgrade Render to a plan with a **static outbound IP** and whitelist it.
+> 3. If neither works, use a free cloud Postgres (**Neon** — neon.tech) and
+>    just change `DATABASE_URL`. Nothing else changes.
+>
+> Tables (`users`, `coupons`, `redemptions`) are created automatically on
+> first boot — you don't run any SQL.
+
 ### Views / API endpoints
 
 The frontend has five tabs, each backed by one endpoint:
@@ -87,16 +133,15 @@ a symbol, the Chart tab still shows the GEX profile and levels.
    window.PROFITLAB_API = "https://quantsistem-api.onrender.com"; // ← your Render URL
    ```
    Use the exact URL from Part 1, **no trailing slash**.
-2. Upload the **contents of `web/`** (not the folder itself) to SiteGround so
+2. Upload **all of `web/`** (the files, not the folder itself) to SiteGround so
    they land in `public_html/quantsistem/`:
-   - `index.html`
-   - `config.js`
-   - `universe.js`
-   - `app.js`
+   - `index.html` · `login.html` · `admin.html`
+   - `config.js` · `auth.js` · `universe.js` · `app.js`
+   - `plotly.min.js` (the charting library, served locally — no CDN)
 
    Two ways:
    - **Site Tools → File Manager**: navigate to `public_html`, create a folder
-     `quantsistem`, open it, **Upload** the four files.
+     `quantsistem`, open it, **Upload** all the files.
    - **FTP** (FileZilla): connect with your SiteGround FTP credentials, drop the
      four files into `public_html/quantsistem/`.
 3. Open <https://profitlab-academy.com/quantsistem/>. The page loads, the ticker

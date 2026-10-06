@@ -17,3 +17,12 @@ services:
         sync: false        # set this secret in the Render dashboard, not in git
       - key: ALLOWED_ORIGINS
         value: https://profitlab-academy.com
+      # ── accounts / coupons / admin ──
+      - key: DATABASE_URL
+        sync: false        # mysql+pymysql://user:pass@host:3306/db  (or Postgres/sqlite)
+      - key: JWT_SECRET
+        generateValue: true   # Render generates a strong random secret
+      - key: ADMIN_EMAIL
+        sync: false        # your admin login email
+      - key: ADMIN_PASSWORD
+        sync: false        # your admin login password

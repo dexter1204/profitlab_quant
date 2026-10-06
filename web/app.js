@@ -69,7 +69,9 @@
   }
   async function fetchJSON(path) {
     if (!API) throw new Error("API no configurada. Edita config.js con la URL de tu backend (Render).");
-    const res = await fetch(`${API}${path}`);
+    const res = await fetch(`${API}${path}`, { headers: window.PLAuth.authHeaders() });
+    if (res.status === 401) { window.PLAuth.clearToken(); window.PLAuth.goLogin(); throw new Error("Sesión expirada"); }
+    if (res.status === 403) { window.PLAuth.goLogin(); throw new Error("Acceso no activo"); }
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
       try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (_) {}
@@ -439,6 +441,23 @@
     loadView(state.view, { force: true });
   }
 
+  // ── account chrome ───────────────────────────────────────────────────────
+  function renderAccount(user) {
+    const info = el("acctInfo");
+    if (info) {
+      let exp = "";
+      if (user.lifetime) exp = '<span class="exp life">Acceso vitalicio</span>';
+      else if (user.access_until) {
+        const d = new Date(user.access_until);
+        exp = `<span class="exp ok">Acceso hasta ${d.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}</span>`;
+      }
+      info.innerHTML = `<b>${user.name || user.email}</b>${exp}`;
+    }
+    if (user.is_admin) el("adminLink").style.display = "";
+    const lo = el("logoutBtn");
+    if (lo) lo.addEventListener("click", () => window.PLAuth.logout());
+  }
+
   // ── boot ────────────────────────────────────────────────────────────────
   function init() {
     const sel = el("ticker");
@@ -481,7 +500,16 @@
     switchTo("gamma");
   }
 
+  // Gate the dashboard behind a valid, access-active session before booting.
+  async function boot() {
+    const user = await window.PLAuth.guard();
+    if (!user) return;                       // guard redirected to login
+    if (!user.has_access) { window.PLAuth.goLogin(); return; }  // needs coupon
+    renderAccount(user);
+    init();
+  }
+
   if (document.readyState === "loading")
-    document.addEventListener("DOMContentLoaded", init);
-  else init();
+    document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();

@@ -30,8 +30,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fastapi import Depends  # noqa: E402
+
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
+
+from . import auth as auth_mod, db as db_mod  # noqa: E402
+from .auth import require_access  # noqa: E402
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
 
@@ -45,9 +50,24 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# accounts / coupons / admin
+app.include_router(auth_mod.auth_router)
+app.include_router(auth_mod.coupon_router)
+app.include_router(auth_mod.admin_router)
+
+
+@app.on_event("startup")
+def _startup():
+    db_mod.init_db()
+    auth_mod.ensure_admin()
+
+
+# Every market-data endpoint requires an active (non-expired) account.
+GATED = [Depends(require_access)]
 
 
 # ── tiny in-memory TTL cache (keeps Polygon calls light) ─────────────────────
@@ -135,7 +155,7 @@ def _gamma_payload(ticker: str, window: int) -> dict:
     }
 
 
-@app.get("/api/analyze/{ticker}")
+@app.get("/api/analyze/{ticker}", dependencies=GATED)
 def analyze(ticker: str, window: int = Query(20, ge=5, le=60)):
     """Everything the Gamma & Flow view needs for one ticker, as JSON."""
     ticker = ticker.upper().strip()
@@ -146,7 +166,7 @@ def analyze(ticker: str, window: int = Query(20, ge=5, le=60)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/chart/{ticker}")
+@app.get("/api/chart/{ticker}", dependencies=GATED)
 def chart(ticker: str,
           interval: str = Query("1m"),
           period: str = Query("1d"),
@@ -204,7 +224,7 @@ def chart(ticker: str,
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/oi/{ticker}")
+@app.get("/api/oi/{ticker}", dependencies=GATED)
 def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
     """Call/put open interest per strike (and each as a share of total OI)
     — powers the OI and % OI view."""
@@ -238,7 +258,7 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/gex_heatmap/{ticker}")
+@app.get("/api/gex_heatmap/{ticker}", dependencies=GATED)
 def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
     """GEX on a strike × expiry grid — the GEX heat map. Returns a dense
     matrix `z[strike_index][expiry_index]` plus the axes."""
@@ -272,7 +292,7 @@ def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/iv/{ticker}")
+@app.get("/api/iv/{ticker}", dependencies=GATED)
 def iv_premium(ticker: str):
     """ATM IV vs realized vol (HV10/30/60), premium and term structure."""
     ticker = ticker.upper().strip()
@@ -296,7 +316,7 @@ def iv_premium(ticker: str):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/market")
+@app.get("/api/market", dependencies=GATED)
 def market_heatmap():
     """Day-change treemap data for the market universe. Falls back to the
     deterministic demo universe if the live vendor returns nothing (e.g. an
@@ -348,7 +368,7 @@ def _atm_iv(chain, spot) -> float:
     return 0.20
 
 
-@app.get("/api/delta_surface/{ticker}")
+@app.get("/api/delta_surface/{ticker}", dependencies=GATED)
 def delta_surface(ticker: str,
                   kind: str = Query("call"),
                   days: int = Query(60, ge=7, le=180)):
@@ -385,7 +405,7 @@ def delta_surface(ticker: str,
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/net_drift/{ticker}")
+@app.get("/api/net_drift/{ticker}", dependencies=GATED)
 def net_drift(ticker: str, spot_pct: float = Query(0.05, ge=0.01, le=0.20)):
     """Dealer net-delta drift profile across a ±spot_pct spot range. Slope
     sign shows where hedging amplifies (short gamma) or dampens moves."""
@@ -416,7 +436,7 @@ def net_drift(ticker: str, spot_pct: float = Query(0.05, ge=0.01, le=0.20)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/vol_drift/{ticker}")
+@app.get("/api/vol_drift/{ticker}", dependencies=GATED)
 def vol_drift(ticker: str):
     """ATM / call / put implied-vol term structure by expiry (DTE) plus the
     put-call skew — the Volatility Drift view."""
@@ -442,7 +462,7 @@ def vol_drift(ticker: str):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@app.get("/api/vol_surface/{ticker}")
+@app.get("/api/vol_surface/{ticker}", dependencies=GATED)
 def vol_surface(ticker: str, window: int = Query(18, ge=5, le=60)):
     """Implied vol on a strike × expiry grid — the Volatility Surface view."""
     ticker = ticker.upper().strip()
