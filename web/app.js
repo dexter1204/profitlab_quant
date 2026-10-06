@@ -311,6 +311,7 @@
       const layout = Object.assign({}, BASE_LAYOUT, {
         margin: { l: 0, r: 0, t: 10, b: 0 },
         scene: {
+          dragmode: "turntable",   // arrastrar = rotar (no pan)
           xaxis: SCENE_AX("Spot"), yaxis: SCENE_AX("Días a vencimiento"),
           zaxis: SCENE_AX(`${d.kind === "put" ? "Put" : "Call"} Δ`),
           camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
@@ -406,6 +407,7 @@
       const layout = Object.assign({}, BASE_LAYOUT, {
         margin: { l: 0, r: 0, t: 10, b: 0 },
         scene: {
+          dragmode: "turntable",   // arrastrar = rotar (no pan)
           xaxis: SCENE_AX("Días a vencimiento"), yaxis: SCENE_AX("Strike"), zaxis: SCENE_AX("IV %"),
           camera: { eye: { x: 1.7, y: -1.5, z: 0.8 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
         },
