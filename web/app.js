@@ -295,6 +295,41 @@
   const SCENE_AX = (text) => ({ title: { text }, gridcolor: C.border, color: C.muted,
     backgroundcolor: "rgba(0,0,0,0)", showbackground: true });
 
+  // Smooth a 2-D grid: fill null holes from neighbours, then box-blur a few
+  // passes. Tames the spiky raw IV surface without losing its shape.
+  function smoothGrid(z, passes) {
+    if (!z || !z.length || !z[0]) return z;
+    const rows = z.length, cols = z[0].length;
+    let g = z.map((r) => r.slice());
+    const nb4 = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (let fp = 0; fp < 4; fp++) {         // fill holes
+      let changed = false;
+      const out = g.map((r) => r.slice());
+      for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+        if (g[i][j] == null || !isFinite(g[i][j])) {
+          let s = 0, n = 0;
+          for (const [di, dj] of nb4) { const a = i + di, b = j + dj;
+            if (a >= 0 && a < rows && b >= 0 && b < cols && g[a][b] != null && isFinite(g[a][b])) { s += g[a][b]; n++; } }
+          if (n) { out[i][j] = s / n; changed = true; }
+        }
+      }
+      g = out; if (!changed) break;
+    }
+    for (let pz = 0; pz < (passes || 1); pz++) {   // box blur (8-neighbour)
+      const out = g.map((r) => r.slice());
+      for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+        let s = 0, n = 0;
+        for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+          const a = i + di, b = j + dj;
+          if (a >= 0 && a < rows && b >= 0 && b < cols && g[a][b] != null && isFinite(g[a][b])) { s += g[a][b]; n++; }
+        }
+        if (n) out[i][j] = s / n;
+      }
+      g = out;
+    }
+    return g;
+  }
+
   // ── view 6: DELTA SURFACE (3-D surface, 2-D heatmap fallback/toggle) ──────
   const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
   let _dsurfData = null;
@@ -396,13 +431,16 @@
   let _volSurfData = null;
   function renderVolSurface(d) {
     _volSurfData = d;
-    const zpct = (d.z || []).map((row) => row.map((v) => v == null ? null : v * 100));
+    const raw = (d.z || []).map((row) => row.map((v) => v == null ? null : v * 100));
+    const zpct = smoothGrid(raw, 2);   // smooth the spiky raw IV surface
     const x = (d.dte && d.dte.length) ? d.dte : d.expiries;
     if (state.surf3d && webglOK()) {
       const surf = {
         type: "surface", z: zpct, x, y: d.strikes || [], colorscale: "Viridis",
         colorbar: { title: { text: "IV %", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
         hovertemplate: "DTE %{x}<br>Strike %{y:,.0f}<br>IV %{z:.1f}%<extra></extra>",
+        lighting: { ambient: 0.75, diffuse: 0.75, roughness: 0.95, specular: 0.05, fresnel: 0.15 },
+        contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
       };
       const layout = Object.assign({}, BASE_LAYOUT, {
         margin: { l: 0, r: 0, t: 10, b: 0 },
