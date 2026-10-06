@@ -180,7 +180,11 @@
         <button data-kind="call" class="active">Call delta</button>
         <button data-kind="put">Put delta</button>
       </div>
-      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · mapa de calor</span>
+      <div class="seg surf3dToggle">
+        <button data-s3d="3d" class="active">3D</button>
+        <button data-s3d="2d">2D</button>
+      </div>
+      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · arrastra para rotar</span>
     </div>
     <div class="panel"><div id="deltaSurf" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
@@ -200,7 +204,11 @@
         <button data-mode="drift" class="active">Term structure</button>
         <button data-mode="surface">Surface</button>
       </div>
-      <span class="hint">IV ATM / call / put por vencimiento · superficie = mapa de calor strike × vencimiento</span>
+      <div class="seg surf3dToggle">
+        <button data-s3d="3d" class="active">3D</button>
+        <button data-s3d="2d">2D</button>
+      </div>
+      <span class="hint">IV ATM / call / put por vencimiento · Surface = superficie strike × vencimiento</span>
     </div>
     <div class="panel"><div id="volChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>

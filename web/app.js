@@ -42,6 +42,7 @@
     oiMode: "oi",
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
+    surf3d: true,                  // surfaces: 3D (default) | 2D heatmap
     timeframe: "5m",               // chart timeframe
     loaded: new Set(),             // "view:symbol[:sub]" already fetched+rendered
   };
@@ -281,9 +282,43 @@
     Plotly.react(el("oiChart"), [putT, callT], layout, CONFIG);
   }
 
-  // ── view 6: DELTA SURFACE (2-D heatmap — no WebGL needed) ─────────────────
+  // WebGL available? (true even for software WebGL; false only if truly absent)
+  let _webgl = null;
+  function webglOK() {
+    if (_webgl !== null) return _webgl;
+    try {
+      const c = document.createElement("canvas");
+      _webgl = !!(window.WebGLRenderingContext && (c.getContext("webgl") || c.getContext("experimental-webgl")));
+    } catch (_) { _webgl = false; }
+    return _webgl;
+  }
+  const SCENE_AX = (text) => ({ title: { text }, gridcolor: C.border, color: C.muted,
+    backgroundcolor: "rgba(0,0,0,0)", showbackground: true });
+
+  // ── view 6: DELTA SURFACE (3-D surface, 2-D heatmap fallback/toggle) ──────
   const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
+  let _dsurfData = null;
   function renderDeltaSurface(d) {
+    _dsurfData = d;
+    const use3d = state.surf3d && webglOK();
+    if (use3d) {
+      const surf = {
+        type: "surface", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
+        colorscale: SURF_SCALE, cmid: d.kind === "put" ? -0.5 : 0.5,
+        colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+        hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
+      };
+      const layout = Object.assign({}, BASE_LAYOUT, {
+        margin: { l: 0, r: 0, t: 10, b: 0 },
+        scene: {
+          xaxis: SCENE_AX("Spot"), yaxis: SCENE_AX("Días a vencimiento"),
+          zaxis: SCENE_AX(`${d.kind === "put" ? "Put" : "Call"} Δ`),
+          camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
+        },
+      });
+      Plotly.react(el("deltaSurf"), [surf], layout, { responsive: true, displayModeBar: false });
+      return;
+    }
     const heat = {
       type: "heatmap", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
       colorscale: SURF_SCALE, zmid: d.kind === "put" ? -0.5 : 0.5,
@@ -356,13 +391,30 @@
     Plotly.react(el("volChart"), traces, layout, CONFIG);
   }
 
-  // ── view 8b: VOLATILITY — surface (2-D heatmap — no WebGL needed) ──────────
+  // ── view 8b: VOLATILITY — surface (3-D surface, 2-D heatmap fallback/toggle)
+  let _volSurfData = null;
   function renderVolSurface(d) {
+    _volSurfData = d;
     const zpct = (d.z || []).map((row) => row.map((v) => v == null ? null : v * 100));
     const x = (d.dte && d.dte.length) ? d.dte : d.expiries;
+    if (state.surf3d && webglOK()) {
+      const surf = {
+        type: "surface", z: zpct, x, y: d.strikes || [], colorscale: "Viridis",
+        colorbar: { title: { text: "IV %", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+        hovertemplate: "DTE %{x}<br>Strike %{y:,.0f}<br>IV %{z:.1f}%<extra></extra>",
+      };
+      const layout = Object.assign({}, BASE_LAYOUT, {
+        margin: { l: 0, r: 0, t: 10, b: 0 },
+        scene: {
+          xaxis: SCENE_AX("Días a vencimiento"), yaxis: SCENE_AX("Strike"), zaxis: SCENE_AX("IV %"),
+          camera: { eye: { x: 1.7, y: -1.5, z: 0.8 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
+        },
+      });
+      Plotly.react(el("volChart"), [surf], layout, { responsive: true, displayModeBar: false });
+      return;
+    }
     const heat = {
-      type: "heatmap", z: zpct, x, y: d.strikes || [],
-      colorscale: "Viridis",
+      type: "heatmap", z: zpct, x, y: d.strikes || [], colorscale: "Viridis",
       colorbar: { title: { text: "IV %", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
       hovertemplate: "DTE %{x}<br>Strike %{y:,.0f}<br>IV %{z:.1f}%<extra></extra>",
     };
@@ -494,6 +546,20 @@
     segReload("deltaKind", "kind", "deltaKind", "dsurf");
     segReload("volMode", "mode", "volMode", "vol");
     segReload("timeframe", "tf", "timeframe", "chart");
+
+    // 3D / 2D toggle for the surface views (re-renders from cached data)
+    for (const seg of document.querySelectorAll(".surf3dToggle")) {
+      seg.addEventListener("click", (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        state.surf3d = b.dataset.s3d === "3d";
+        for (const t of document.querySelectorAll(".surf3dToggle button"))
+          t.classList.toggle("active", t.dataset.s3d === b.dataset.s3d);
+        if (state.view === "dsurf" && _dsurfData) renderDeltaSurface(_dsurfData);
+        else if (state.view === "vol" && state.volMode === "surface" && _volSurfData) renderVolSurface(_volSurfData);
+        const c = el(VIEWS[state.view].plot);
+        if (c && c.data) Plotly.Plots.resize(c);
+      });
+    }
 
     window.addEventListener("resize", () => {
       const c = el(VIEWS[state.view].plot);
