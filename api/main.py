@@ -45,9 +45,17 @@ _origins = [
         "https://profitlab-academy.com,http://localhost:8000,http://localhost:5500",
     ).split(",") if o.strip()
 ]
+# Match the whole domain (with or without www / any subdomain) so the frontend
+# origin is accepted whether the site loads from profitlab-academy.com or
+# www.profitlab-academy.com. Override with ALLOWED_ORIGIN_REGEX if needed.
+_origin_regex = os.environ.get(
+    "ALLOWED_ORIGIN_REGEX",
+    r"https://([a-z0-9-]+\.)?profitlab-academy\.com",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=False,
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
