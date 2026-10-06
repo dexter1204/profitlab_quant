@@ -157,26 +157,45 @@ def chart(ticker: str,
     stock bars); the gamma profile always comes back."""
     ticker = ticker.upper().strip()
 
+    def _bars_from(df):
+        df = df.dropna(subset=["open", "high", "low", "close"])
+        return [
+            {
+                "t": pd.Timestamp(r.ts).isoformat(),
+                "o": _clean(r.open), "h": _clean(r.high),
+                "l": _clean(r.low), "c": _clean(r.close),
+                "v": _clean(getattr(r, "volume", None)),
+            }
+            for r in df.itertuples(index=False)
+        ]
+
+    def _yf_bars():
+        # yfinance serves free (delayed) intraday bars for stocks AND indices
+        # (^SPX, ^NDX); used as a fallback so the chart has candles even on an
+        # options-only Polygon plan that can't price stock aggregates.
+        from profitlab.data import yfinance as _yf
+        return _yf.intraday_bars(ticker, interval=interval, period=period)
+
     def _compute():
         payload = _gamma_payload(ticker, window)
-        bars = []
-        try:
-            df = pdata.intraday_bars(ticker, interval=interval, period=period)
-            if df is not None and len(df):
-                df = df.dropna(subset=["open", "high", "low", "close"])
-                bars = [
-                    {
-                        "t": pd.Timestamp(r.ts).isoformat(),
-                        "o": _clean(r.open), "h": _clean(r.high),
-                        "l": _clean(r.low), "c": _clean(r.close),
-                        "v": _clean(getattr(r, "volume", None)),
-                    }
-                    for r in df.itertuples(index=False)
-                ]
-        except Exception:
-            bars = []  # chart still renders the gamma profile + levels
+        bars, source = [], None
+        loaders = [("vendor", lambda: pdata.intraday_bars(ticker, interval=interval, period=period))]
+        if pdata.vendor_name() not in ("yf", "yfinance"):
+            loaders.append(("yfinance", _yf_bars))
+        for name, loader in loaders:
+            try:
+                df = loader()
+                if df is not None and len(df):
+                    bars = _bars_from(df)
+                    if bars:
+                        source = name
+                        break
+            except Exception:
+                continue
         payload["bars"] = bars
+        payload["bars_source"] = source
         payload["interval"] = interval
+        payload["period"] = period
         return payload
 
     try:

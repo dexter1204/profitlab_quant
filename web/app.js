@@ -1,5 +1,6 @@
 // ProfitLab Quant — frontend logic (multi-view).
-// Tabs: Gamma & Flow · Chart · GEX Heatmap · OI / % OI · Market Heatmap.
+// Tabs: Gamma & Flow · Chart · GEX Heatmap · OI / % OI · Delta Surface ·
+// Net Drift · Volatility.
 // All data comes from the FastAPI backend (window.PROFITLAB_API); the
 // browser only renders. Pure Plotly.js, no build step.
 
@@ -16,11 +17,22 @@
     cyan: "#06b6d4", amber: "#f59e0b", yellow: "#facc15",
   };
   const FONT = { color: C.muted, family: "Inter, sans-serif", size: 11 };
+  // dragmode "pan" = drag to move, wheel to zoom (TradingView-style); no
+  // rubber-band box zoom. scrollZoom in CONFIG enables the wheel.
   const BASE_LAYOUT = {
     paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
-    font: FONT,
+    font: FONT, dragmode: "pan",
   };
-  const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true };
+  const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true, doubleClick: "reset" };
+
+  // chart timeframes → (interval, period) for the bars loader
+  const TF = {
+    "1m":  { interval: "1m",  period: "1d" },
+    "5m":  { interval: "5m",  period: "5d" },
+    "15m": { interval: "15m", period: "1mo" },
+    "1h":  { interval: "60m", period: "3mo" },
+    "1D":  { interval: "1d",  period: "1y" },
+  };
 
   // ── state ────────────────────────────────────────────────────────────────
   const state = {
@@ -30,6 +42,7 @@
     oiMode: "oi",
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
+    timeframe: "5m",               // chart timeframe
     loaded: new Set(),             // "view:symbol[:sub]" already fetched+rendered
   };
 
@@ -266,50 +279,6 @@
     Plotly.react(el("oiChart"), [putT, callT], layout, CONFIG);
   }
 
-  // ── view 5: MARKET HEATMAP (treemap by sector, color = day change) ────────
-  function renderMarket(d) {
-    const rows = d.rows || [];
-    const labels = [], parents = [], values = [], colors = [], texts = [], custom = [];
-    const sectors = [...new Set(rows.map((r) => r.sector))];
-    for (const s of sectors) { labels.push(s); parents.push(""); values.push(0); colors.push(0); texts.push(""); custom.push([null, null]); }
-    for (const r of rows) {
-      labels.push(r.ticker); parents.push(r.sector);
-      values.push(Math.max(r.weight || 1, 1));
-      colors.push((r.pct || 0) * 100);
-      texts.push(`${r.ticker}<br>${(r.pct >= 0 ? "+" : "")}${(r.pct * 100).toFixed(2)}%`);
-      custom.push([r.price, r.pct]);
-    }
-    const tm = {
-      type: "treemap", branchvalues: "remainder",
-      labels, parents, values,
-      marker: {
-        colors, cmid: 0, cmin: -4, cmax: 4,
-        colorscale: [[0, C.red], [0.5, "#111a2b"], [1, C.green]],
-        line: { color: C.bg, width: 1 },
-      },
-      text: texts, textinfo: "text", textfont: { size: 12, color: C.text },
-      customdata: custom,
-      hovertemplate: "%{label}<br>Price %{customdata[0]:,.2f}<br>Chg %{customdata[1]:.2%}<extra></extra>",
-      tiling: { pad: 2 },
-    };
-    const layout = Object.assign({}, BASE_LAYOUT, { margin: { l: 6, r: 6, t: 6, b: 6 } });
-    Plotly.react(el("marketHeat"), [tm], layout, CONFIG);
-
-    const s = d.summary || {};
-    const cells = [
-      { lbl: "Symbols", v: fmtInt(s.n_symbols), sc: "" },
-      { lbl: "Advancing", v: fmtInt(s.n_up), sc: "pos" },
-      { lbl: "Declining", v: fmtInt(s.n_down), sc: "neg" },
-      { lbl: "Breadth", v: fmtPct(s.breadth_pct), sc: s.breadth_pct >= 0.5 ? "pos" : "neg" },
-      { lbl: "Best", v: `${(s.best || {}).ticker || "—"}`, sc: "pos", s2: fmtPct((s.best || {}).pct) },
-      { lbl: "Worst", v: `${(s.worst || {}).ticker || "—"}`, sc: "neg", s2: fmtPct((s.worst || {}).pct) },
-    ];
-    el("marketSummary").innerHTML = cells.map((x) => `
-      <div class="cell"><div class="lbl">${x.lbl}</div>
-        <div class="val ${x.sc}">${x.v}</div>
-        <div class="sub ${x.sc}">${x.s2 || (d.source === "demo" ? "demo" : "")}</div></div>`).join("");
-  }
-
   // ── view 6: DELTA SURFACE (3-D) ───────────────────────────────────────────
   const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
   function renderDeltaSurface(d) {
@@ -412,7 +381,10 @@
   // ── view registry ──────────────────────────────────────────────────────────
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
-    chart:   { plot: "priceChart", symbolic: true,  path: (s) => `/api/chart/${s}?window=24`,   render: renderChart },
+    chart:   { plot: "priceChart", symbolic: true,  sub: () => state.timeframe,
+               path: (s) => { const t = TF[state.timeframe] || TF["5m"];
+                 return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
+               render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
@@ -421,7 +393,6 @@
     vol:     { plot: "volChart",   symbolic: true,  sub: () => state.volMode,
                path: (s) => state.volMode === "surface" ? `/api/vol_surface/${s}` : `/api/vol_drift/${s}`,
                render: (d) => state.volMode === "surface" ? renderVolSurface(d) : renderVolDrift(d) },
-    market:  { plot: "marketHeat", symbolic: false, path: () => `/api/market`,                   render: renderMarket },
   };
 
   async function loadView(view, { force = false } = {}) {
@@ -464,8 +435,7 @@
     state.pick = pick;
     state.symbol = U.resolve(pick) || DEFAULT_TICKER;
     el("tkName").textContent = U.isFutures(pick) ? `${pick} → ${state.symbol}` : state.symbol;
-    // invalidate per-symbol views; market is symbol-independent
-    state.loaded = new Set([...state.loaded].filter((k) => k.startsWith("market:")));
+    state.loaded.clear();   // every view is symbol-specific now
     loadView(state.view, { force: true });
   }
 
@@ -501,6 +471,7 @@
     };
     segReload("deltaKind", "kind", "deltaKind", "dsurf");
     segReload("volMode", "mode", "volMode", "vol");
+    segReload("timeframe", "tf", "timeframe", "chart");
 
     window.addEventListener("resize", () => {
       const c = el(VIEWS[state.view].plot);
