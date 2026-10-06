@@ -25,15 +25,17 @@ Do these in order: **backend first** (you need its URL), then the frontend.
 
 ### Accounts, coupons & payment
 
-The dashboard reuses the **Aula Virtual** accounts and its MySQL database.
-Students log in once in the Aula (`profitlab-academy.com/aulavirtual`); because
-the Aula and the quant live on the **same domain**, they share the `pl_token`
-session. Access to the dashboard is granted by a **coupon** or a **payment**
-(Mercado Pago), both handled by the Aula's PHP API against its own database.
+The dashboard has its **own login** (`/quantsistem/login.html`) with its own
+session (localStorage `plq_token`, independent from the Aula). Users sign in
+with their **Aula credentials** (same email + password) — the quant validates
+them against the Aula accounts via `POST /api/auth/login`. Access to the
+dashboard is then granted by a **coupon** or a **payment** (Mercado Pago), both
+handled by the Aula's PHP API against its own database.
 
 How it works:
-1. Visitor opens `/quantsistem/` → the frontend reads the Aula's `pl_token`.
-   No token → redirected to the Aula login.
+1. Visitor opens `/quantsistem/` with no session → the quant's own
+   `login.html`. They enter their Aula email + password → the quant stores a
+   token under `plq_token` (not the Aula's `pl_token`).
 2. The frontend asks the Aula `GET /api/quant/me`. If the user has active
    access → dashboard loads.
 3. If not → a **paywall**: redeem a coupon, or **pay** to unlock (opens
@@ -63,7 +65,7 @@ Quant backend env var (set in Render → Environment):
 | `AULA_API_BASE` | `https://profitlab-academy.com/aulavirtual/api` |
 
 Front-end URLs live in `web/config.js` under `window.PROFITLAB_AULA`
-(`apiBase`, `loginUrl`, `homeUrl`) — adjust if your Aula paths differ.
+(`apiBase`, `signupUrl`, `adminUrl`) — adjust if your Aula paths differ.
 
 ### Views / API endpoints
 
@@ -132,7 +134,7 @@ a symbol, the Chart tab still shows the GEX profile and levels.
    Use the exact URL from Part 1, **no trailing slash**.
 2. Upload **all of `web/`** (the files, not the folder itself) to SiteGround so
    they land in `public_html/quantsistem/`:
-   - `index.html` · `admin.html`
+   - `index.html` · `login.html` · `admin.html`
    - `config.js` · `auth.js` · `universe.js` · `app.js`
    - `plotly.min.js` (the charting library, served locally — no CDN)
 

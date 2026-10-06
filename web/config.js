@@ -2,16 +2,14 @@
 // 1) URL del backend de datos (Render).
 window.PROFITLAB_API = "https://profitlab-quant.onrender.com";
 
-// 2) Aula Virtual (mismo dominio → sesión compartida con pl_token).
-//    El acceso al dashboard se gestiona en el Aula: cupón o pago.
+// 2) Aula Virtual: el quant tiene su PROPIO login, pero valida las
+//    credenciales (email + contraseña) contra las cuentas del Aula.
 window.PROFITLAB_AULA = {
-  // Base de la API PHP del Aula (cupones, pago, sesión). Ruta relativa porque
+  // Base de la API PHP del Aula (login, cupones, pago). Ruta relativa porque
   // el Aula y el quant comparten dominio.
   apiBase: "/aulavirtual/api",
-  // Login del Aula (a donde se envía a quien no tiene sesión).
-  loginUrl: "/aulavirtual/login",
-  // A dónde volver al cerrar sesión.
-  homeUrl: "/aulavirtual",
+  // Registro de cuentas nuevas (en el Aula) — enlace desde el login del quant.
+  signupUrl: "/aulavirtual/signup",
   // Panel de gestión del Aula (solo se muestra a administradores).
   adminUrl: "/aulavirtual/admin/estudiantes",
 };

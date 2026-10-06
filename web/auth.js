@@ -6,12 +6,28 @@
 (function () {
   const AULA = window.PROFITLAB_AULA || {};
   const API_BASE = (AULA.apiBase || "/aulavirtual/api").replace(/\/+$/, "");
-  const KEY = "pl_token";   // SAME key the Aula frontend uses
+  // Own session key — NOT the Aula's "pl_token", so the quant login is
+  // independent. Credentials are still validated against the Aula accounts.
+  const KEY = "plq_token";
 
   const getToken = () => { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } };
+  const setToken = (t) => { try { localStorage.setItem(KEY, t); } catch (_) {} };
   const clearToken = () => { try { localStorage.removeItem(KEY); } catch (_) {} };
-  const goLogin = () => { location.href = AULA.loginUrl || "/"; };
-  function logout() { clearToken(); location.href = AULA.homeUrl || AULA.loginUrl || "/"; }
+  const goLogin = () => { location.href = "login.html"; };
+  function logout() { clearToken(); goLogin(); }
+
+  // Sign in with Aula credentials (email + password) via the Aula API.
+  async function login(email, password) {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    let data = null; try { data = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error((data && (data.error || data.detail)) || "Email o contraseña incorrectos");
+    if (!data || !data.token) throw new Error("Respuesta inválida del Aula");
+    setToken(data.token);
+    return data;
+  }
 
   function headers(extra) {
     const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
@@ -103,7 +119,7 @@
   }
 
   window.PLAuth = {
-    AULA, API_BASE, getToken, clearToken, headers, authHeaders: headers,
-    aula, guard, logout, goLogin, showPaywall,
+    AULA, API_BASE, getToken, setToken, clearToken, headers, authHeaders: headers,
+    aula, login, guard, logout, goLogin, showPaywall,
   };
 })();
