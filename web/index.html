@@ -115,6 +115,9 @@
     <button class="tab" data-view="chart">Chart</button>
     <button class="tab" data-view="gexheat">GEX Heatmap</button>
     <button class="tab" data-view="oi">OI / % OI</button>
+    <button class="tab" data-view="dsurf">Delta Surface</button>
+    <button class="tab" data-view="drift">Net Drift</button>
+    <button class="tab" data-view="vol">Volatility</button>
     <button class="tab" data-view="market">Market Heatmap</button>
   </div>
 
@@ -149,6 +152,38 @@
       <span class="hint">green = calls · red = puts</span>
     </div>
     <div class="panel"><div id="oiChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── DELTA SURFACE ── -->
+  <section id="view-dsurf" class="view hidden">
+    <div class="toolbar">
+      <div class="seg" id="deltaKind">
+        <button data-kind="call" class="active">Call delta</button>
+        <button data-kind="put">Put delta</button>
+      </div>
+      <span class="hint">B-S delta across spot × time-to-expiry at the ATM strike · drag to rotate</span>
+    </div>
+    <div class="panel"><div id="deltaSurf" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── NET DRIFT ── -->
+  <section id="view-drift" class="view hidden">
+    <div class="toolbar">
+      <span class="hint">Dealer net dollar-delta if spot moved ±5% · upward slope = short-gamma (amplifies), downward = long-gamma (dampens)</span>
+    </div>
+    <div class="panel"><div id="netDrift" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── VOLATILITY (drift term-structure + surface) ── -->
+  <section id="view-vol" class="view hidden">
+    <div class="toolbar">
+      <div class="seg" id="volMode">
+        <button data-mode="drift" class="active">Term structure</button>
+        <button data-mode="surface">Surface</button>
+      </div>
+      <span class="hint">ATM / call / put IV by expiry · surface drags to rotate</span>
+    </div>
+    <div class="panel"><div id="volChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
   <!-- ── MARKET HEATMAP ── -->

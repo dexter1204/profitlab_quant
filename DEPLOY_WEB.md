@@ -33,6 +33,9 @@ The frontend has five tabs, each backed by one endpoint:
 | Chart | `GET /api/chart/{ticker}` | intraday candles with the GEX profile at the side + key level lines |
 | GEX Heatmap | `GET /api/gex_heatmap/{ticker}` | GEX on a strike × expiry grid |
 | OI / % OI | `GET /api/oi/{ticker}` | call/put open interest per strike (toggle absolute ↔ % of total) |
+| Delta Surface | `GET /api/delta_surface/{ticker}` | 3-D B-S delta across spot × time-to-expiry (call/put toggle) |
+| Net Drift | `GET /api/net_drift/{ticker}` | dealer net dollar-delta profile across a ±5% spot range |
+| Volatility | `GET /api/vol_drift/{ticker}`, `GET /api/vol_surface/{ticker}` | IV term structure (ATM/call/put by DTE) + 3-D IV surface (toggle) |
 | Market Heatmap | `GET /api/market` | sector treemap colored by day change + breadth summary |
 
 (`GET /api/iv/{ticker}` is also available for IV-vs-realized premium.)

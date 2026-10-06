@@ -28,7 +28,9 @@
     pick: DEFAULT_TICKER,          // what the user selected (may be a future)
     symbol: DEFAULT_TICKER,        // resolved symbol the API loads
     oiMode: "oi",
-    loaded: new Set(),             // "view:symbol" already fetched+rendered
+    deltaKind: "call",             // delta surface: call | put
+    volMode: "drift",              // volatility: drift | surface
+    loaded: new Set(),             // "view:symbol[:sub]" already fetched+rendered
   };
 
   // ── formatting ─────────────────────────────────────────────────────────
@@ -308,28 +310,139 @@
         <div class="sub ${x.sc}">${x.s2 || (d.source === "demo" ? "demo" : "")}</div></div>`).join("");
   }
 
+  // ── view 6: DELTA SURFACE (3-D) ───────────────────────────────────────────
+  const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
+  function renderDeltaSurface(d) {
+    const surf = {
+      type: "surface", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
+      colorscale: SURF_SCALE, cmid: d.kind === "put" ? -0.5 : 0.5,
+      colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+      hovertemplate: "Spot %{x:,.0f}<br>Days %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
+      contours: { z: { show: true, usecolormap: true, width: 1, project: { z: true } } },
+    };
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 0, r: 0, t: 10, b: 0 },
+      scene: {
+        xaxis: { title: { text: "Spot" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        yaxis: { title: { text: "Days to expiry" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        zaxis: { title: { text: `${d.kind === "put" ? "Put" : "Call"} Δ` }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } },
+        aspectratio: { x: 1.3, y: 1, z: 0.7 },
+      },
+    });
+    Plotly.react(el("deltaSurf"), [surf], layout, { responsive: true, displayModeBar: false });
+  }
+
+  // ── view 7: NET DRIFT ──────────────────────────────────────────────────────
+  function renderNetDrift(d) {
+    const x = d.spot_grid || [], y = d.net_delta || [];
+    const line = {
+      type: "scatter", mode: "lines", x, y,
+      line: { color: C.cyan, width: 2.5 }, fill: "tozeroy",
+      fillcolor: "rgba(6,182,212,.10)", name: "Net dealer Δ",
+      hovertemplate: "Spot %{x:,.0f}<br>Net Δ %{y:$,.0f}<extra></extra>",
+    };
+    const shapes = [];
+    const anns = [];
+    const vline = (val, color, label) => {
+      if (val == null || !isFinite(val) || val < x[0] || val > x[x.length - 1]) return;
+      shapes.push({ type: "line", xref: "x", x0: val, x1: val, yref: "paper", y0: 0, y1: 1,
+        line: { color, width: 1.4, dash: "dot" } });
+      anns.push({ xref: "x", x: val, yref: "paper", y: 1, yanchor: "bottom", showarrow: false,
+        text: label, font: { size: 9, color } });
+    };
+    vline(d.spot, C.text, `SPOT ${fmtLevel(d.spot)}`);
+    vline(d.gamma_flip, C.purple, "γ FLIP");
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 70, r: 24, t: 30, b: 44 }, shapes, annotations: anns, showlegend: false,
+      xaxis: { title: { text: "Spot price", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
+      yaxis: { title: { text: "Net dealer dollar-delta ($)", font: { size: 10 } },
+        gridcolor: C.grid, zeroline: true, zerolinecolor: C.border, tickfont: { size: 10 } },
+    });
+    Plotly.react(el("netDrift"), [line], layout, CONFIG);
+  }
+
+  // ── view 8a: VOLATILITY — term structure (drift) ──────────────────────────
+  function renderVolDrift(d) {
+    const x = d.dte || [];
+    const pctAxis = (name, arr, color, dash) => ({
+      type: "scatter", mode: "lines+markers", x, y: (arr || []).map((v) => v == null ? null : v * 100),
+      name, line: { color, width: 2, dash: dash || "solid" }, marker: { size: 5, color },
+      hovertemplate: `${name} %{y:.1f}%<br>%{x} DTE<extra></extra>`,
+    });
+    const traces = [
+      pctAxis("ATM IV", d.atm_iv, C.cyan),
+      pctAxis("Call IV", d.call_iv, C.green, "dot"),
+      pctAxis("Put IV", d.put_iv, C.red, "dot"),
+    ];
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 60, r: 24, t: 30, b: 44 }, showlegend: true,
+      legend: { orientation: "h", x: 0, y: 1.08, font: { color: C.text } },
+      xaxis: { title: { text: "Days to expiry", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
+      yaxis: { title: { text: "Implied volatility (%)", font: { size: 10 } }, gridcolor: C.grid,
+        ticksuffix: "%", tickfont: { size: 10 } },
+    });
+    Plotly.react(el("volChart"), traces, layout, CONFIG);
+  }
+
+  // ── view 8b: VOLATILITY — surface (3-D) ────────────────────────────────────
+  function renderVolSurface(d) {
+    const zpct = (d.z || []).map((row) => row.map((v) => v == null ? null : v * 100));
+    const xaxis = (d.dte && d.dte.length) ? d.dte : d.expiries;
+    const surf = {
+      type: "surface", z: zpct, x: xaxis, y: d.strikes || [],
+      colorscale: "Viridis",
+      colorbar: { title: { text: "IV %", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+      hovertemplate: "DTE %{x}<br>Strike %{y:,.0f}<br>IV %{z:.1f}%<extra></extra>",
+      contours: { z: { show: true, usecolormap: true, width: 1, project: { z: true } } },
+    };
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 0, r: 0, t: 10, b: 0 },
+      scene: {
+        xaxis: { title: { text: "Days to expiry" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        yaxis: { title: { text: "Strike" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        zaxis: { title: { text: "IV %" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
+        camera: { eye: { x: 1.7, y: -1.5, z: 0.8 } },
+        aspectratio: { x: 1.3, y: 1, z: 0.7 },
+      },
+    });
+    Plotly.react(el("volChart"), [surf], layout, { responsive: true, displayModeBar: false });
+  }
+
   // ── view registry ──────────────────────────────────────────────────────────
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
     chart:   { plot: "priceChart", symbolic: true,  path: (s) => `/api/chart/${s}?window=24`,   render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
+    dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
+               path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
+    drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
+    vol:     { plot: "volChart",   symbolic: true,  sub: () => state.volMode,
+               path: (s) => state.volMode === "surface" ? `/api/vol_surface/${s}` : `/api/vol_drift/${s}`,
+               render: (d) => state.volMode === "surface" ? renderVolSurface(d) : renderVolDrift(d) },
     market:  { plot: "marketHeat", symbolic: false, path: () => `/api/market`,                   render: renderMarket },
   };
 
   async function loadView(view, { force = false } = {}) {
     const def = VIEWS[view];
+    const plotEl = el(def.plot);
     const sym = def.symbolic ? state.symbol : "_";
-    const key = `${view}:${sym}`;
+    const sub = def.sub ? def.sub() : "";
+    const key = `${view}:${sym}:${sub}`;
     if (!force && state.loaded.has(key)) return;
     setError("");
-    el(def.plot).innerHTML = '<div class="loading">Cargando…</div>';
+    const hadPlot = !!(plotEl && plotEl.data);   // Plotly stores .data on the div
+    if (!hadPlot) plotEl.innerHTML = '<div class="loading">Cargando…</div>';
     try {
       const data = await fetchJSON(def.path(state.symbol));
+      // purge any existing plot so 3-D (WebGL) views re-render cleanly
+      if (hadPlot) { try { Plotly.purge(plotEl); } catch (_) {} }
       def.render(data);
       state.loaded.add(key);
     } catch (e) {
-      el(def.plot).innerHTML = "";
+      try { Plotly.purge(plotEl); } catch (_) {}
+      plotEl.innerHTML = "";
       const label = def.symbolic ? ` de ${state.symbol}` : "";
       setError(`No se pudieron cargar los datos${label}: ${e.message}`);
     }
@@ -370,8 +483,24 @@
       state.oiMode = b.dataset.mode;
       for (const x of el("oiMode").querySelectorAll("button"))
         x.classList.toggle("active", x === b);
-      drawOI();
+      drawOI();   // redraw from cached data, no refetch
     });
+
+    // segmented toggles that switch which endpoint a view loads
+    const segReload = (id, attr, field, view) => {
+      el(id).addEventListener("click", (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        state[field] = b.dataset[attr];
+        for (const x of el(id).querySelectorAll("button"))
+          x.classList.toggle("active", x === b);
+        loadView(view).then(() => {
+          const c = el(VIEWS[view].plot);
+          if (c && c.data) Plotly.Plots.resize(c);
+        });
+      });
+    };
+    segReload("deltaKind", "kind", "deltaKind", "dsurf");
+    segReload("volMode", "mode", "volMode", "vol");
 
     window.addEventListener("resize", () => {
       const c = el(VIEWS[state.view].plot);

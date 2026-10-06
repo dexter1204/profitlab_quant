@@ -314,3 +314,138 @@ def market_heatmap():
         return _cached("market", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+def _atm_iv(chain, spot) -> float:
+    """Front-expiry ATM implied vol, with a sane fallback."""
+    try:
+        by_exp = exposures.iv_by_expiry(chain, spot)
+        if len(by_exp):
+            v = float(by_exp["atm_iv"].iloc[0])
+            if v and v == v and v > 0:  # finite & positive
+                return v
+    except Exception:
+        pass
+    return 0.20
+
+
+@app.get("/api/delta_surface/{ticker}")
+def delta_surface(ticker: str,
+                  kind: str = Query("call"),
+                  days: int = Query(60, ge=7, le=180)):
+    """Black-Scholes delta over a (spot × time-to-expiry) grid at the ATM
+    strike — the Delta Surface 3-D view."""
+    ticker = ticker.upper().strip()
+    kind = kind.lower().strip()
+    if kind not in ("call", "put"):
+        kind = "call"
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        ctx = exposures.ChainContext(
+            spot=spot,
+            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
+        )
+        iv = _atm_iv(chain, spot)
+        spot_axis, days_axis, grid = exposures.delta_surface(
+            ctx, strike=spot, iv=iv, days_max=days, kind=kind,
+        )
+        z = [[_clean(v) for v in row] for row in grid]  # (n_time, n_spot)
+        return {
+            "ticker": ticker, "spot": _clean(spot), "kind": kind,
+            "iv": _clean(iv),
+            "spot_axis": [float(s) for s in spot_axis],
+            "days_axis": [float(d) for d in days_axis],
+            "z": z,
+        }
+
+    try:
+        return _cached(f"dsurf:{ticker}:{kind}:{days}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/net_drift/{ticker}")
+def net_drift(ticker: str, spot_pct: float = Query(0.05, ge=0.01, le=0.20)):
+    """Dealer net-delta drift profile across a ±spot_pct spot range. Slope
+    sign shows where hedging amplifies (short gamma) or dampens moves."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        ctx = exposures.ChainContext(
+            spot=spot,
+            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
+        )
+        df = exposures.net_drift(chain, ctx, spot_pct=spot_pct)
+        gex = exposures.gex_by_strike(chain, ctx)
+        dex = exposures.dex_by_strike(chain, ctx)
+        levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
+        return {
+            "ticker": ticker, "spot": _clean(spot),
+            "gamma_flip": _clean(levels.get("gamma_flip")),
+            "delta_flip": _clean(levels.get("delta_flip")),
+            "spot_grid": [float(s) for s in df["spot"]],
+            "net_delta": [_clean(v) for v in df["net_delta"]],
+        }
+
+    try:
+        return _cached(f"drift:{ticker}:{spot_pct}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/vol_drift/{ticker}")
+def vol_drift(ticker: str):
+    """ATM / call / put implied-vol term structure by expiry (DTE) plus the
+    put-call skew — the Volatility Drift view."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        df = exposures.iv_by_expiry(chain, spot)
+        return {
+            "ticker": ticker, "spot": _clean(spot),
+            "dte": [int(x) for x in df["dte"]],
+            "expiries": [pd.Timestamp(e).strftime("%Y-%m-%d") for e in df["expiry"]],
+            "atm_iv": [_clean(v) for v in df["atm_iv"]],
+            "call_iv": [_clean(v) for v in df["call_iv"]],
+            "put_iv": [_clean(v) for v in df["put_iv"]],
+            "skew": [_clean(v) for v in df["skew"]],
+        }
+
+    try:
+        return _cached(f"voldrift:{ticker}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/vol_surface/{ticker}")
+def vol_surface(ticker: str, window: int = Query(18, ge=5, le=60)):
+    """Implied vol on a strike × expiry grid — the Volatility Surface view."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        grid = exposures.iv_surface(chain, spot, strike_window=window)
+        wide = (grid.pivot(index="strike", columns="expiry", values="iv")
+                .sort_index())
+        wide = wide.reindex(sorted(wide.columns), axis=1)
+        strikes = [float(s) for s in wide.index]
+        expiries = [pd.Timestamp(c).strftime("%Y-%m-%d") for c in wide.columns]
+        dte0 = pd.Timestamp(wide.columns.min()) if len(wide.columns) else None
+        dte = [int((pd.Timestamp(c) - dte0).days) for c in wide.columns] if dte0 is not None else []
+        z = [[_clean(v) for v in row] for row in wide.to_numpy()]
+        return {
+            "ticker": ticker, "spot": _clean(spot),
+            "strikes": strikes, "expiries": expiries, "dte": dte, "z": z,
+        }
+
+    try:
+        return _cached(f"volsurf:{ticker}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
