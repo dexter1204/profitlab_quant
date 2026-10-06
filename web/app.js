@@ -281,27 +281,27 @@
     Plotly.react(el("oiChart"), [putT, callT], layout, CONFIG);
   }
 
-  // ── view 6: DELTA SURFACE (3-D) ───────────────────────────────────────────
+  // ── view 6: DELTA SURFACE (2-D heatmap — no WebGL needed) ─────────────────
   const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
   function renderDeltaSurface(d) {
-    const surf = {
-      type: "surface", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
-      colorscale: SURF_SCALE, cmid: d.kind === "put" ? -0.5 : 0.5,
+    const heat = {
+      type: "heatmap", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
+      colorscale: SURF_SCALE, zmid: d.kind === "put" ? -0.5 : 0.5,
       colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
-      hovertemplate: "Spot %{x:,.0f}<br>Days %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
-      contours: { z: { show: true, usecolormap: true, width: 1, project: { z: true } } },
+      hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
     };
+    const shapes = [];
+    if (d.spot != null && isFinite(d.spot)) {
+      shapes.push({ type: "line", xref: "x", x0: d.spot, x1: d.spot, yref: "paper", y0: 0, y1: 1,
+        line: { color: C.text, width: 1.3, dash: "dot" } });
+    }
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 0, r: 0, t: 10, b: 0 },
-      scene: {
-        xaxis: { title: { text: "Spot" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        yaxis: { title: { text: "Days to expiry" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        zaxis: { title: { text: `${d.kind === "put" ? "Put" : "Call"} Δ` }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } },
-        aspectratio: { x: 1.3, y: 1, z: 0.7 },
-      },
+      margin: { l: 60, r: 20, t: 30, b: 44 }, shapes,
+      xaxis: { title: { text: `Spot  ·  ${d.kind === "put" ? "Put" : "Call"} Δ`, font: { size: 10 } },
+        gridcolor: C.grid, tickfont: { size: 10 } },
+      yaxis: { title: { text: "Días a vencimiento", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
     });
-    Plotly.react(el("deltaSurf"), [surf], layout, { responsive: true, displayModeBar: false });
+    Plotly.react(el("deltaSurf"), [heat], layout, CONFIG);
   }
 
   // ── view 7: NET DRIFT ──────────────────────────────────────────────────────
@@ -356,28 +356,27 @@
     Plotly.react(el("volChart"), traces, layout, CONFIG);
   }
 
-  // ── view 8b: VOLATILITY — surface (3-D) ────────────────────────────────────
+  // ── view 8b: VOLATILITY — surface (2-D heatmap — no WebGL needed) ──────────
   function renderVolSurface(d) {
     const zpct = (d.z || []).map((row) => row.map((v) => v == null ? null : v * 100));
-    const xaxis = (d.dte && d.dte.length) ? d.dte : d.expiries;
-    const surf = {
-      type: "surface", z: zpct, x: xaxis, y: d.strikes || [],
+    const x = (d.dte && d.dte.length) ? d.dte : d.expiries;
+    const heat = {
+      type: "heatmap", z: zpct, x, y: d.strikes || [],
       colorscale: "Viridis",
       colorbar: { title: { text: "IV %", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
       hovertemplate: "DTE %{x}<br>Strike %{y:,.0f}<br>IV %{z:.1f}%<extra></extra>",
-      contours: { z: { show: true, usecolormap: true, width: 1, project: { z: true } } },
     };
+    const shapes = [];
+    if (d.spot != null && isFinite(d.spot)) {
+      shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: d.spot, y1: d.spot,
+        line: { color: C.text, width: 1.3, dash: "dot" } });
+    }
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 0, r: 0, t: 10, b: 0 },
-      scene: {
-        xaxis: { title: { text: "Days to expiry" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        yaxis: { title: { text: "Strike" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        zaxis: { title: { text: "IV %" }, gridcolor: C.border, color: C.muted, backgroundcolor: "rgba(0,0,0,0)", showbackground: true },
-        camera: { eye: { x: 1.7, y: -1.5, z: 0.8 } },
-        aspectratio: { x: 1.3, y: 1, z: 0.7 },
-      },
+      margin: { l: 62, r: 20, t: 30, b: 44 }, shapes,
+      xaxis: { title: { text: "Días a vencimiento", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 9 } },
+      yaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
     });
-    Plotly.react(el("volChart"), [surf], layout, { responsive: true, displayModeBar: false });
+    Plotly.react(el("volChart"), [heat], layout, CONFIG);
   }
 
   // ── view registry ──────────────────────────────────────────────────────────
