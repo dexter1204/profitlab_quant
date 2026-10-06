@@ -39,26 +39,23 @@ from .aula import require_access  # noqa: E402  — access via the Aula Virtual
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
 
-_origins = [
-    o.strip() for o in os.environ.get(
-        "ALLOWED_ORIGINS",
-        "https://profitlab-academy.com,http://localhost:8000,http://localhost:5500",
-    ).split(",") if o.strip()
-]
-# Match the whole domain (with or without www / any subdomain) so the frontend
-# origin is accepted whether the site loads from profitlab-academy.com or
-# www.profitlab-academy.com. Override with ALLOWED_ORIGIN_REGEX if needed.
-_origin_regex = os.environ.get(
-    "ALLOWED_ORIGIN_REGEX",
-    r"https://([a-z0-9-]+\.)?profitlab-academy\.com",
-)
+# CORS: allow any origin by default. This is safe here because every data
+# endpoint is protected by the Aula Bearer token (no cookies, so no CSRF
+# surface), and it removes a whole class of "No Access-Control-Allow-Origin"
+# failures from www/non-www or env typos. Lock it down by setting
+# ALLOWED_ORIGINS to a comma-separated list if you ever want to.
+_allowed = os.environ.get("ALLOWED_ORIGINS", "*").strip()
+if _allowed in ("", "*"):
+    _cors = dict(allow_origins=["*"])
+else:
+    _cors = dict(allow_origins=[o.strip() for o in _allowed.split(",") if o.strip()],
+                 allow_origin_regex=os.environ.get("ALLOWED_ORIGIN_REGEX"))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_origin_regex=_origin_regex,
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
+    **_cors,
 )
 
 

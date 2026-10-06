@@ -16,7 +16,7 @@ services:
       - key: POLYGON_API_KEY
         sync: false        # set this secret in the Render dashboard, not in git
       - key: ALLOWED_ORIGINS
-        value: https://profitlab-academy.com
+        value: "*"      # token-protected API; "*" avoids CORS origin issues
       # ── access via the Aula Virtual (coupon / payment) ──
       - key: AULA_API_BASE
         value: https://profitlab-academy.com/aulavirtual/api
