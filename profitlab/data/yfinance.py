@@ -152,6 +152,7 @@ def option_chain(
         "bid": raw.get("bid", np.nan).astype(float),
         "ask": raw.get("ask", np.nan).astype(float),
         "last": raw.get("lastPrice", np.nan).astype(float),
+        "volume": (raw["volume"] if "volume" in raw else pd.Series(0.0, index=raw.index)).fillna(0).astype(float),
     })
     # Tighter IV clip: yfinance frequently emits IVs near zero at deep-OTM
     # strikes (data holes) which blow up gamma / second-order greeks.

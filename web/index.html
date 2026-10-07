@@ -125,6 +125,7 @@
     <button class="tab" data-view="chart">Chart</button>
     <button class="tab" data-view="gexheat">GEX Heatmap</button>
     <button class="tab" data-view="oi">OI / % OI</button>
+    <button class="tab" data-view="flow">Big Trades</button>
     <button class="tab" data-view="dsurf">Delta Surface</button>
     <button class="tab" data-view="drift">Net Drift</button>
     <button class="tab" data-view="vol">Volatility</button>
@@ -171,6 +172,13 @@
       <span class="hint">green = calls · red = puts</span>
     </div>
     <div class="panel"><div id="oiChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── BIG TRADES (flujo grande por nivel) ── -->
+  <section id="view-flow" class="view hidden">
+    <div class="ribbon" id="flowRibbon"></div>
+    <div class="toolbar"><span class="hint">$ nocional negociado hoy por nivel (volumen × precio × 100) · Vol/OI &gt; 1 = posicionamiento nuevo agresivo</span></div>
+    <div class="panel"><div id="flowChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
   <!-- ── DELTA SURFACE ── -->

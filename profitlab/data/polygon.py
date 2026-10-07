@@ -288,6 +288,7 @@ def option_chain(
                 "bid": float(last_q.get("bid") or np.nan),
                 "ask": float(last_q.get("ask") or np.nan),
                 "last": float(day.get("close") or np.nan),
+                "volume": float(day.get("volume") or 0.0),
             })
         if len(rows) >= max_contracts:
             break

@@ -24,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -214,6 +215,65 @@ def chart(ticker: str,
 
     try:
         return _cached(f"chart:{ticker}:{interval}:{period}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/flow/{ticker}", dependencies=GATED)
+def flow(ticker: str, top: int = Query(15, ge=5, le=40)):
+    """Big-trade flow by strike: today's traded $ notional (volume × price ×
+    100) per level, call vs put, ranked. vol_oi > 1 flags new, aggressive
+    positioning (volume above existing open interest)."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        chain = pdata.option_chain(ticker)
+        spot = pdata.spot(ticker)
+        df = chain.copy()
+        # best per-contract price: quote mid, else day close/last
+        bid = pd.to_numeric(df.get("bid"), errors="coerce")
+        ask = pd.to_numeric(df.get("ask"), errors="coerce")
+        mid = (bid + ask) / 2.0
+        price = mid.where(mid > 0).fillna(pd.to_numeric(df.get("last"), errors="coerce"))
+        df["price"] = price.fillna(0.0)
+        df["vol"] = pd.to_numeric(df.get("volume", 0.0), errors="coerce").fillna(0.0)
+        df["notional"] = df["vol"] * df["price"] * 100.0
+        is_call = df["type"].str.lower() == "call"
+        agg = (df.assign(
+                    call_vol=np.where(is_call, df["vol"], 0.0),
+                    put_vol=np.where(~is_call, df["vol"], 0.0),
+                    call_notional=np.where(is_call, df["notional"], 0.0),
+                    put_notional=np.where(~is_call, df["notional"], 0.0),
+               ).groupby("strike", as_index=False)
+                .agg(call_vol=("call_vol", "sum"), put_vol=("put_vol", "sum"),
+                     call_notional=("call_notional", "sum"), put_notional=("put_notional", "sum"),
+                     oi=("oi", "sum")))
+        agg["total_notional"] = agg["call_notional"] + agg["put_notional"]
+        agg["total_vol"] = agg["call_vol"] + agg["put_vol"]
+        agg["vol_oi"] = agg["total_vol"] / agg["oi"].replace(0, np.nan)
+        ranked = agg.sort_values("total_notional", ascending=False).head(top)
+        rows = [{
+            "strike": float(r.strike),
+            "call_vol": _clean(r.call_vol), "put_vol": _clean(r.put_vol),
+            "call_notional": _clean(r.call_notional), "put_notional": _clean(r.put_notional),
+            "total_notional": _clean(r.total_notional),
+            "oi": _clean(r.oi), "vol_oi": _clean(r.vol_oi),
+            "bias": "call" if r.call_notional >= r.put_notional else "put",
+        } for r in ranked.itertuples(index=False)]
+        return {
+            "ticker": ticker, "spot": _clean(spot), "rows": rows,
+            "totals": {
+                "call_notional": _clean(agg["call_notional"].sum()),
+                "put_notional": _clean(agg["put_notional"].sum()),
+                "call_vol": _clean(agg["call_vol"].sum()),
+                "put_vol": _clean(agg["put_vol"].sum()),
+                "total_notional": _clean(agg["total_notional"].sum()),
+                "top_strike": float(ranked.iloc[0]["strike"]) if len(ranked) else None,
+            },
+        }
+
+    try:
+        return _cached(f"flow:{ticker}:{top}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

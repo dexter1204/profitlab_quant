@@ -48,12 +48,20 @@ def demo_chain(ticker: str = "QQQ", asof: pd.Timestamp | None = None) -> pd.Data
             iv = atm_iv + skew + rng.normal(0, 0.005)
             call_oi = float(1500 * _bell(k, spot + 4 * step, 6 * step) + 200 * rng.random())
             put_oi = float(1800 * _bell(k, spot - 4 * step, 6 * step) + 200 * rng.random())
-            rows.append({"strike": float(k), "expiry": exp, "type": "call", "oi": call_oi, "iv": iv})
-            rows.append({"strike": float(k), "expiry": exp, "type": "put", "oi": put_oi, "iv": iv})
+            extr = iv * (max(t, 0.02) ** 0.5) * spot * 0.4  # rough extrinsic premium
+            call_px = max(spot - k, 0.0) + extr
+            put_px = max(k - spot, 0.0) + extr
+            # synthetic day volume: more near ATM + front expiries + noise
+            vfac = _bell(k, spot, 7 * step) * (0.4 / max(t, 0.02))
+            call_vol = float(max(0.0, 900 * vfac + 150 * rng.random()))
+            put_vol = float(max(0.0, 1000 * vfac + 150 * rng.random()))
+            rows.append({"strike": float(k), "expiry": exp, "type": "call", "oi": call_oi, "iv": iv,
+                         "last": call_px, "volume": call_vol})
+            rows.append({"strike": float(k), "expiry": exp, "type": "put", "oi": put_oi, "iv": iv,
+                         "last": put_px, "volume": put_vol})
     df = pd.DataFrame(rows)
     df["bid"] = np.nan
     df["ask"] = np.nan
-    df["last"] = np.nan
     return df
 
 

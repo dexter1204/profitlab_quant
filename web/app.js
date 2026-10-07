@@ -282,6 +282,50 @@
     Plotly.react(el("oiChart"), [putT, callT], layout, CONFIG);
   }
 
+  // ── view: BIG TRADES (traded $ notional per level, call vs put) ───────────
+  function renderFlow(d) {
+    const rows = (d.rows || []).slice().reverse();   // largest at top
+    const y = rows.map((r) => `$${fmtLevel(r.strike)}`);
+    const callT = {
+      type: "bar", orientation: "h", y, x: rows.map((r) => r.call_notional || 0),
+      name: "Call $", marker: { color: C.green },
+      customdata: rows.map((r) => [r.call_vol || 0]),
+      hovertemplate: "Strike %{y}<br>Call $%{x:,.0f}<br>Vol %{customdata[0]:,.0f}<extra></extra>",
+    };
+    const putT = {
+      type: "bar", orientation: "h", y, x: rows.map((r) => r.put_notional || 0),
+      name: "Put $", marker: { color: C.red },
+      customdata: rows.map((r) => [r.put_vol || 0]),
+      hovertemplate: "Strike %{y}<br>Put $%{x:,.0f}<br>Vol %{customdata[0]:,.0f}<extra></extra>",
+    };
+    const anns = [];
+    rows.forEach((r, i) => {
+      if (r.vol_oi && r.vol_oi > 1) anns.push({
+        xref: "paper", x: 1, xanchor: "right", yref: "y", y: y[i], yanchor: "middle",
+        text: "● NUEVO", showarrow: false, font: { size: 9, color: C.amber } });
+    });
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 72, r: 76, t: 28, b: 40 }, barmode: "stack", annotations: anns,
+      showlegend: true, legend: { orientation: "h", x: 0, y: 1.06, font: { color: C.text } },
+      xaxis: { title: { text: "$ nocional negociado hoy", font: { size: 10 } },
+        gridcolor: C.grid, tickprefix: "$", tickformat: ".2s", tickfont: { size: 9 } },
+      yaxis: { type: "category", automargin: true, tickfont: { size: 10 } },
+    });
+    Plotly.react(el("flowChart"), [callT, putT], layout, CONFIG);
+
+    const t = d.totals || {};
+    const callHeavy = (t.call_notional || 0) >= (t.put_notional || 0);
+    const cells = [
+      { c: "call", lbl: "Call $ hoy", v: fmtBig(t.call_notional), s: "flujo comprador", sc: "pos" },
+      { c: "put", lbl: "Put $ hoy", v: fmtBig(t.put_notional), s: "flujo comprador", sc: "neg" },
+      { c: callHeavy ? "call" : "put", lbl: "Sesgo", v: callHeavy ? "CALL HEAVY" : "PUT HEAVY", s: "del flujo $", sc: callHeavy ? "pos" : "neg" },
+      { c: "gamma", lbl: "Nivel top", v: t.top_strike != null ? `$${fmtLevel(t.top_strike)}` : "—", s: "más $ hoy", sc: "" },
+    ];
+    el("flowRibbon").innerHTML = cells.map((x) => `
+      <div class="cell ${x.c}"><div class="lbl">${x.lbl}</div>
+        <div class="val">${x.v}</div><div class="sub ${x.sc}">${x.s}</div></div>`).join("");
+  }
+
   // WebGL available? (true even for software WebGL; false only if truly absent)
   let _webgl = null;
   function webglOK() {
@@ -442,6 +486,7 @@
                render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
+    flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
                path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
     drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
