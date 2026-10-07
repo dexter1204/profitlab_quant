@@ -99,6 +99,31 @@
   .seg button.active{background:rgba(34,197,94,.14); color:var(--green-soft)}
   .hint{color:var(--muted); font-size:11px}
 
+  /* ── exposure rank panel (Gamma & Flow right column) ── */
+  #regimePanel{display:flex; flex-direction:column; gap:12px}
+  .rp-seg{align-self:flex-start}
+  .rp-tiles{display:grid; grid-template-columns:1fr 1fr; gap:1px;
+    background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .rp-tile{background:var(--panel); padding:9px 11px; display:flex; flex-direction:column; gap:2px}
+  .rp-tile.wide{grid-column:1 / -1}
+  .rp-tile .t{color:var(--muted); font-size:9px; letter-spacing:.14em; font-weight:700; text-transform:uppercase}
+  .rp-tile .vv{color:var(--text-strong); font-size:16px; font-weight:600; line-height:1.1; font-variant-numeric:tabular-nums}
+  .rp-tile .vv.pos{color:var(--green)} .rp-tile .vv.neg{color:var(--red)}
+  .rp-tile .ss{font-size:10px; color:var(--muted)}
+  .rp-split{display:flex; height:24px; border-radius:6px; overflow:hidden; font-size:10px; font-weight:700; letter-spacing:.04em}
+  .rp-split .put{background:rgba(239,68,68,.9); color:#fff; display:flex; align-items:center; padding:0 9px; white-space:nowrap}
+  .rp-split .call{background:rgba(34,197,94,.9); color:#05241a; display:flex; align-items:center; justify-content:flex-end; padding:0 9px; flex:1; white-space:nowrap}
+  .rp-rank{display:flex; flex-direction:column; gap:5px}
+  .rp-row{display:grid; grid-template-columns:52px 1fr 80px; align-items:center; gap:8px}
+  .rp-k{font-size:11px; color:var(--text); font-weight:600; font-variant-numeric:tabular-nums}
+  .rp-track{height:14px; background:rgba(148,163,184,.08); border-radius:3px; overflow:hidden}
+  .rp-fill{display:block; height:100%; border-radius:3px}
+  .rp-fill.pos{background:var(--green)} .rp-fill.neg{background:var(--red)}
+  .rp-amt{font-size:11px; text-align:right; font-weight:600; font-variant-numeric:tabular-nums}
+  .rp-amt.pos{color:var(--green)} .rp-amt.neg{color:var(--red)}
+  .rp-foot{color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    border-top:1px solid var(--border); padding-top:8px}
+
   .hidden{display:none !important}
 </style>
 </head>

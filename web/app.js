@@ -40,6 +40,7 @@
     pick: DEFAULT_TICKER,          // what the user selected (may be a future)
     symbol: DEFAULT_TICKER,        // resolved symbol the API loads
     oiMode: "oi",
+    regimeMode: "gex",             // Gamma&Flow right column: gex | dex
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
     surf3d: true,                  // surfaces: 3D (default) | 2D heatmap
@@ -136,41 +137,86 @@
     Plotly.react(el("gammaChart"), [gexBars, dexLine], layout, CONFIG);
     renderRegime(d);
   }
-  function statRow(k, v) {
-    return `<div class="statrow"><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  }
+  // Right-column exposure panel — ranks the live chain by absolute GEX (or
+  // DEX), SpotGamma-style: a GEX|DEX toggle, stat tiles, a put/call split
+  // bar, and a ranked list of strikes with signed $ magnitude bars.
+  let _regimeData = null;
   function renderRegime(d) {
-    const r = d.regime || {}, L = d.levels || {}, T = d.totals || {};
-    const label = (r.label || "UNKNOWN").toUpperCase();
-    let cls = "trans";
-    if (label.includes("LONG")) cls = "long"; else if (label.includes("SHORT")) cls = "short";
-    const gap = r.gap_pct;
-    const gapTxt = gap == null ? "—" : `${gap >= 0 ? "+" : ""}${(gap * 100).toFixed(2)}% vs γ-flip`;
+    if (d) _regimeData = d;
+    d = _regimeData;
+    if (!d) return;
+    const mode = state.regimeMode === "dex" ? "dex" : "gex";
+    const T = d.totals || {};
+    const strikes = (mode === "dex" ? d.dex_strikes : d.strikes) || [];
+    const vals = (mode === "dex" ? d.dex : d.gex) || [];
+    const net = mode === "dex" ? T.dex : T.gex;
+
+    const pairs = strikes
+      .map((k, i) => ({ k: Number(k), v: Number(vals[i]) || 0 }))
+      .filter((p) => isFinite(p.k));
+    let grossPos = 0, grossNeg = 0;
+    pairs.forEach((p) => { if (p.v >= 0) grossPos += p.v; else grossNeg += -p.v; });
+    const gross = grossPos + grossNeg || 1;
+    const callPct = grossPos / gross, putPct = grossNeg / gross;
+    const putHeavy = grossNeg >= grossPos;
+    const biasPct = Math.round((putHeavy ? putPct : callPct) * 100);
+
+    const callZone = pairs.filter((p) => p.v > 0).sort((a, b) => b.v - a.v)[0];
+    const putZone = pairs.filter((p) => p.v < 0).sort((a, b) => a.v - b.v)[0];
+    const ranked = pairs.slice().sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const major = ranked[0];
+    const maxAbs = ranked.length ? Math.abs(ranked[0].v) || 1 : 1;
+
+    const netSign = net >= 0 ? "pos" : "neg";
+    const M = mode.toUpperCase();
+    const tiles = `
+      <div class="rp-tiles">
+        <div class="rp-tile"><span class="t">Net ${M}</span>
+          <span class="vv ${netSign}">${fmtBig(net)}</span>
+          <span class="ss">${net >= 0 ? "net long" : "net short"}</span></div>
+        <div class="rp-tile"><span class="t">${mode === "dex" ? "Pos Zone" : "Call Zone"}</span>
+          <span class="vv">${callZone ? "$" + fmtLevel(callZone.k) : "—"}</span>
+          <span class="ss">${callZone ? fmtBig(callZone.v) : "—"}</span></div>
+        <div class="rp-tile"><span class="t">${mode === "dex" ? "Neg Zone" : "Put Zone"}</span>
+          <span class="vv">${putZone ? "$" + fmtLevel(putZone.k) : "—"}</span>
+          <span class="ss">${putZone ? fmtBig(putZone.v) : "—"}</span></div>
+        <div class="rp-tile"><span class="t">Bias</span>
+          <span class="vv ${putHeavy ? "neg" : "pos"}">${putHeavy ? "PUT HEAVY" : "CALL HEAVY"}</span>
+          <span class="ss">${biasPct}% of gross exp.</span></div>
+        <div class="rp-tile wide"><span class="t">Major Zone</span>
+          <span class="vv ${major && major.v < 0 ? "neg" : "pos"}">${major ? "$" + fmtLevel(major.k) : "—"}</span>
+          <span class="ss">${major ? fmtBig(major.v) + " abs. exposure" : "—"}</span></div>
+      </div>`;
+
+    const split = `
+      <div class="rp-split">
+        <div class="put" style="width:${(putPct * 100).toFixed(1)}%">PUT ${Math.round(putPct * 100)}%</div>
+        <div class="call">CALL ${Math.round(callPct * 100)}%</div>
+      </div>`;
+
+    const rows = ranked.slice(0, 14).map((p) => {
+      const pos = p.v >= 0;
+      const w = Math.max(3, (Math.abs(p.v) / maxAbs) * 100);
+      return `<div class="rp-row">
+        <span class="rp-k">$${fmtLevel(p.k)}</span>
+        <span class="rp-track"><span class="rp-fill ${pos ? "pos" : "neg"}" style="width:${w.toFixed(1)}%"></span></span>
+        <span class="rp-amt ${pos ? "pos" : "neg"}">${fmtBig(p.v)}</span>
+      </div>`;
+    }).join("");
+
     el("regimePanel").innerHTML = `
-      <h3>Dealer Regime</h3>
-      <div class="regime ${cls}"><span class="dot"></span>${label}</div>
-      <div style="text-align:center">
-        <div class="price-big">${fmtPrice(d.spot)}</div>
-        <div class="reading">${r.reading || ""}</div>
-        <div class="reading" style="margin-top:2px">${gapTxt}</div>
+      <div class="rp-seg seg" id="regimeSeg">
+        <button data-rmode="gex" class="${mode === "gex" ? "active" : ""}">GEX</button>
+        <button data-rmode="dex" class="${mode === "dex" ? "active" : ""}">DEX</button>
       </div>
-      <div style="margin-top:14px">
-        ${statRow("Call Wall", fmtLevel(L.call_wall))}
-        ${statRow("Put Wall", fmtLevel(L.put_wall))}
-        ${statRow("Gamma Flip", fmtLevel(L.gamma_flip))}
-        ${statRow("Delta Flip", fmtLevel(L.delta_flip))}
-        ${statRow("Delta Wall", fmtLevel(L.delta_wall))}
-        ${statRow("Major Neg Δ", fmtLevel(L.major_neg_delta))}
-        ${statRow("Max Pain", fmtLevel(L.max_pain))}
-      </div>
-      <div style="margin-top:12px">
-        ${statRow("Total GEX", fmtBig(T.gex))}
-        ${statRow("Total DEX", fmtBig(T.dex))}
-        ${statRow("Vanna", fmtBig(T.vanna))}
-        ${statRow("Charm", fmtBig(T.charm))}
-      </div>
-      <div class="reading" style="margin-top:12px; font-size:10px; letter-spacing:.14em">
-        VENDOR · ${(d.vendor || "—").toUpperCase()}</div>`;
+      ${tiles}
+      ${split}
+      <div class="rp-rank">${rows || '<div class="reading">Sin datos</div>'}</div>
+      <div class="rp-foot">Current chain snapshot · ranked by absolute ${M}</div>`;
+
+    el("regimePanel").querySelectorAll("[data-rmode]").forEach((b) => {
+      b.onclick = () => { state.regimeMode = b.dataset.rmode; renderRegime(); };
+    });
   }
 
   // ── view 2: CHART (candles + GEX profile sharing the price axis) ──────────
