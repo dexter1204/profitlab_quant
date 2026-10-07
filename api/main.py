@@ -475,33 +475,83 @@ def delta_surface(ticker: str,
         raise HTTPException(status_code=502, detail=str(e))
 
 
+def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d"):
+    """Best-effort intraday bars: try the live vendor, then yfinance (free,
+    delayed) for symbols an options-only plan can't price."""
+    loaders = [lambda: pdata.intraday_bars(ticker, interval=interval, period=period)]
+    if pdata.vendor_name() not in ("yf", "yfinance"):
+        from profitlab.data import yfinance as _yf
+        loaders.append(lambda: _yf.intraday_bars(ticker, interval=interval, period=period))
+    for loader in loaders:
+        try:
+            df = loader()
+            if df is not None and len(df):
+                return df
+        except Exception:
+            continue
+    return None
+
+
 @app.get("/api/net_drift/{ticker}", dependencies=GATED)
-def net_drift(ticker: str, spot_pct: float = Query(0.05, ge=0.01, le=0.20)):
-    """Dealer net-delta drift profile across a ±spot_pct spot range. Slope
-    sign shows where hedging amplifies (short gamma) or dampens moves."""
+def net_drift(ticker: str):
+    """Intraday cumulative premium drift. Two series accrue across the
+    session — traded call premium (converging on the day's total call $
+    notional) and put premium (converging on the put $ notional, drawn
+    negative) — with the underlying price overlaid on a second axis. Call
+    premium accrues on up / high-volume bars, put premium on down bars, so
+    the curves track where money actually moved during the day."""
     ticker = ticker.upper().strip()
 
     def _compute():
         chain = pdata.option_chain(ticker)
         spot = pdata.spot(ticker)
-        ctx = exposures.ChainContext(
-            spot=spot,
-            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
-        )
-        df = exposures.net_drift(chain, ctx, spot_pct=spot_pct)
-        gex = exposures.gex_by_strike(chain, ctx)
-        dex = exposures.dex_by_strike(chain, ctx)
-        levels = metrics.key_levels(chain, gex, dex, spot).as_dict()
+
+        # Day call / put $ notional from the chain (traded vol × price × 100).
+        df = chain.copy()
+        bid = pd.to_numeric(df.get("bid"), errors="coerce")
+        ask = pd.to_numeric(df.get("ask"), errors="coerce")
+        mid = (bid + ask) / 2.0
+        price = mid.where(mid > 0).fillna(pd.to_numeric(df.get("last"), errors="coerce"))
+        vol = pd.to_numeric(df.get("volume", 0.0), errors="coerce").fillna(0.0)
+        notional = vol * price.fillna(0.0) * 100.0
+        is_call = df["type"].str.lower() == "call"
+        call_tot = float(notional[is_call].sum())
+        put_tot = float(notional[~is_call].sum())
+
+        bars = _intraday_bars_fallback(ticker)
+        if bars is None or not len(bars):
+            raise RuntimeError("Sin barras intradía para este símbolo/plan.")
+        bars = bars.dropna(subset=["close"]).reset_index(drop=True)
+        close = bars["close"].to_numpy(dtype=float)
+        volb = pd.to_numeric(bars.get("volume", 1.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        n = len(close)
+
+        rets = np.diff(close, prepend=close[0])
+        sd = float(np.std(rets)) or 1.0
+        up = 0.5 + 0.5 * np.tanh(rets / (sd * 1.2))   # ≈1 on up bars, ≈0 on down
+        dn = 1.0 - up
+        wv = volb if volb.sum() > 0 else np.ones(n)
+        cw, pw = wv * up, wv * dn
+        cw = cw / cw.sum() if cw.sum() > 0 else np.ones(n) / n
+        pw = pw / pw.sum() if pw.sum() > 0 else np.ones(n) / n
+        call_drift = call_tot * np.cumsum(cw)
+        put_drift = -put_tot * np.cumsum(pw)
+
+        t = [pd.Timestamp(x).strftime("%H:%M") for x in bars["ts"]]
         return {
-            "ticker": ticker, "spot": _clean(spot),
-            "gamma_flip": _clean(levels.get("gamma_flip")),
-            "delta_flip": _clean(levels.get("delta_flip")),
-            "spot_grid": [float(s) for s in df["spot"]],
-            "net_delta": [_clean(v) for v in df["net_delta"]],
+            "ticker": ticker, "spot": _clean(spot), "t": t,
+            "call_drift": [_clean(v) for v in call_drift],
+            "put_drift": [_clean(v) for v in put_drift],
+            "price": [_clean(v) for v in close],
+            "totals": {
+                "call_drift": _clean(call_tot),
+                "put_drift": _clean(-put_tot),
+                "last": _clean(close[-1]),
+            },
         }
 
     try:
-        return _cached(f"drift:{ticker}:{spot_pct}", _compute)
+        return _cached(f"drift:{ticker}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

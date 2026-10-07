@@ -461,33 +461,43 @@
     Plotly.react(el("deltaSurf"), [heat], layout, CONFIG);
   }
 
-  // ── view 7: NET DRIFT ──────────────────────────────────────────────────────
+  // ── view 7: NET DRIFT (intraday premium drift + price) ────────────────────
   function renderNetDrift(d) {
-    const x = d.spot_grid || [], y = d.net_delta || [];
-    const line = {
-      type: "scatter", mode: "lines", x, y,
-      line: { color: C.cyan, width: 2.5 }, fill: "tozeroy",
-      fillcolor: "rgba(6,182,212,.10)", name: "Net dealer Δ",
-      hovertemplate: "Spot %{x:,.0f}<br>Net Δ %{y:$,.0f}<extra></extra>",
+    const t = d.t || [], T = d.totals || {};
+    const BLUE = "#3b82f6", WHITE = "#e8eef7";
+    const callT = {
+      type: "scatter", mode: "lines", x: t, y: d.call_drift || [], yaxis: "y",
+      name: `Call Drift (${fmtBig(T.call_drift)})`, line: { color: C.red, width: 1.6 },
+      fill: "tozeroy", fillcolor: "rgba(239,68,68,.16)",
+      hovertemplate: "%{x}<br>Call drift %{y:$,.3s}<extra></extra>",
     };
-    const shapes = [];
-    const anns = [];
-    const vline = (val, color, label) => {
-      if (val == null || !isFinite(val) || val < x[0] || val > x[x.length - 1]) return;
-      shapes.push({ type: "line", xref: "x", x0: val, x1: val, yref: "paper", y0: 0, y1: 1,
-        line: { color, width: 1.4, dash: "dot" } });
-      anns.push({ xref: "x", x: val, yref: "paper", y: 1, yanchor: "bottom", showarrow: false,
-        text: label, font: { size: 9, color } });
+    const putT = {
+      type: "scatter", mode: "lines", x: t, y: d.put_drift || [], yaxis: "y",
+      name: `Put Drift (${fmtBig(T.put_drift)})`, line: { color: BLUE, width: 1.6 },
+      fill: "tozeroy", fillcolor: "rgba(59,130,246,.16)",
+      hovertemplate: "%{x}<br>Put drift %{y:$,.3s}<extra></extra>",
     };
-    vline(d.spot, C.text, `SPOT ${fmtLevel(d.spot)}`);
-    vline(d.gamma_flip, C.purple, "γ FLIP");
+    const priceT = {
+      type: "scatter", mode: "lines", x: t, y: d.price || [], yaxis: "y2",
+      name: `${d.ticker || ""} (${fmtPrice(T.last)})`, line: { color: WHITE, width: 1.4 },
+      hovertemplate: `%{x}<br>${d.ticker || ""} $%{y:,.2f}<extra></extra>`,
+    };
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 70, r: 24, t: 30, b: 44 }, shapes, annotations: anns, showlegend: false,
-      xaxis: { title: { text: "Spot price", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
-      yaxis: { title: { text: "Net dealer dollar-delta ($)", font: { size: 10 } },
-        gridcolor: C.grid, zeroline: true, zerolinecolor: C.border, tickfont: { size: 10 } },
+      margin: { l: 66, r: 60, t: 90, b: 42 }, hovermode: "x unified",
+      annotations: [{ xref: "paper", yref: "paper", x: 0.5, xanchor: "center",
+        y: 1.15, yanchor: "bottom", showarrow: false,
+        text: `Net Drift (Premium) · ${d.ticker || ""}`, font: { size: 12, color: C.text } }],
+      showlegend: true,
+      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.02, font: { color: C.text, size: 11 } },
+      xaxis: { type: "category", tickmode: "auto", nticks: 14, gridcolor: C.grid,
+        tickfont: { size: 9 }, showgrid: true },
+      yaxis: { title: { text: "Premium drift ($)", font: { size: 10 } }, gridcolor: C.grid,
+        zeroline: true, zerolinecolor: C.border, tickfont: { size: 9 }, tickformat: "$~s" },
+      yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false,
+        title: { text: "Precio", font: { size: 10, color: WHITE } },
+        tickfont: { size: 9, color: "#cbd5e1" }, tickprefix: "$" },
     });
-    Plotly.react(el("netDrift"), [line], layout, CONFIG);
+    Plotly.react(el("netDrift"), [callT, putT, priceT], layout, CONFIG);
   }
 
   // ── view 8a: VOLATILITY — term structure (drift) ──────────────────────────
