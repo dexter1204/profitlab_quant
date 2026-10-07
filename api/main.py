@@ -314,30 +314,46 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
 
 @app.get("/api/gex_heatmap/{ticker}", dependencies=GATED)
 def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
-    """GEX on a strike × expiry grid — the GEX heat map. Returns a dense
-    matrix `z[strike_index][expiry_index]` plus the axes."""
+    """GEX **and** DEX on a strike × days-to-expiry grid — the exposure heat
+    map table. Returns dense matrices `z_gex`/`z_dex` (indexed
+    [strike_index][col_index]) plus the strike and DTE-column axes, so the
+    frontend can toggle GEX↔DEX without a refetch."""
     ticker = ticker.upper().strip()
 
     def _compute():
         chain = pdata.option_chain(ticker)
         spot = pdata.spot(ticker)
-        ctx = exposures.ChainContext(
-            spot=spot,
-            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
-        )
-        grid = exposures.gex_by_strike_expiry(chain, ctx)
-        step = _strike_step(grid["strike"])
+        asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+        ctx = exposures.ChainContext(spot=spot, asof=asof)
+
+        gex_grid = exposures.gex_by_strike_expiry(chain, ctx)
+        dex_grid = exposures.dex_by_strike_expiry(chain, ctx)
+        step = _strike_step(gex_grid["strike"])
         lo, hi = spot - window * step, spot + window * step
-        grid = grid[(grid["strike"] >= lo) & (grid["strike"] <= hi)]
-        wide = (grid.pivot(index="strike", columns="expiry", values="gex")
-                .sort_index())
-        wide = wide.reindex(sorted(wide.columns), axis=1)
-        strikes = [float(s) for s in wide.index]
-        expiries = [pd.Timestamp(c).strftime("%Y-%m-%d") for c in wide.columns]
-        z = [[_clean(v) for v in row] for row in wide.to_numpy()]
+
+        def _pivot(grid, col):
+            g = grid[(grid["strike"] >= lo) & (grid["strike"] <= hi)]
+            wide = g.pivot(index="strike", columns="expiry", values=col).sort_index()
+            return wide.reindex(sorted(wide.columns), axis=1)
+
+        wide_g = _pivot(gex_grid, "gex")
+        wide_d = _pivot(dex_grid, "dex")
+        # align both matrices on the same strike/expiry axes
+        strikes_idx = wide_g.index.union(wide_d.index).sort_values()
+        cols_idx = wide_g.columns.union(wide_d.columns).sort_values()
+        wide_g = wide_g.reindex(index=strikes_idx, columns=cols_idx)
+        wide_d = wide_d.reindex(index=strikes_idx, columns=cols_idx)
+
+        strikes = [float(s) for s in strikes_idx]
+        expiries = [pd.Timestamp(c).strftime("%Y-%m-%d") for c in cols_idx]
+        dte = [int(max((pd.Timestamp(c) - asof).days, 0)) for c in cols_idx]
+        z_gex = [[_clean(v) for v in row] for row in wide_g.to_numpy()]
+        z_dex = [[_clean(v) for v in row] for row in wide_d.to_numpy()]
         return {
             "ticker": ticker, "spot": _clean(spot),
-            "strikes": strikes, "expiries": expiries, "z": z,
+            "strikes": strikes, "expiries": expiries, "dte": dte,
+            "z_gex": z_gex, "z_dex": z_dex,
+            "z": z_gex,  # back-compat alias
         }
 
     try:

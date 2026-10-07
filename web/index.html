@@ -124,6 +124,30 @@
   .rp-foot{color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
     border-top:1px solid var(--border); padding-top:8px}
 
+  /* ── GEX/DEX heatmap table (strike × DTE) ── */
+  .heatwrap{padding:0; overflow:hidden}
+  .heat-top{display:flex; justify-content:space-between; align-items:center;
+    padding:11px 15px; border-bottom:1px solid var(--border)}
+  .ht-title{color:var(--green); font-size:12px; font-weight:700; letter-spacing:.18em}
+  .ht-sub{color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase}
+  .heat-scroll{overflow:auto; max-height:74vh}
+  table.heat{border-collapse:separate; border-spacing:0; width:100%;
+    font-variant-numeric:tabular-nums}
+  table.heat th.hc{position:sticky; top:0; z-index:3; background:#070b12;
+    color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.12em;
+    padding:8px 12px; text-align:center; border-bottom:1px solid var(--border)}
+  table.heat th.hc.c0{color:var(--amber)}
+  table.heat th.sk{position:sticky; left:0; z-index:2; background:#070b12;
+    text-align:right; color:var(--text); font-size:11px; font-weight:600;
+    padding:5px 12px; border-right:1px solid var(--border); white-space:nowrap}
+  table.heat th.hc.sk{z-index:4; color:var(--muted)}
+  table.heat th.sk i{font-style:normal; font-size:8px; letter-spacing:.14em;
+    color:var(--cyan); margin-left:6px}
+  table.heat td{padding:5px 12px; text-align:center; font-size:11px; color:#eef3fb;
+    font-weight:600; border-bottom:1px solid rgba(8,12,20,.9); white-space:nowrap}
+  tr.spotrow th.sk, tr.spotrow td{box-shadow:inset 0 1px 0 var(--cyan), inset 0 -1px 0 var(--cyan)}
+  tr.spotrow th.sk{color:var(--text-strong)}
+
   .hidden{display:none !important}
 </style>
 </head>
@@ -182,9 +206,16 @@
     <div class="panel"><div id="priceChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
-  <!-- ── GEX HEATMAP ── -->
+  <!-- ── GEX / DEX HEATMAP ── -->
   <section id="view-gexheat" class="view hidden">
-    <div class="panel"><div id="gexHeat" class="plot tall"><div class="loading">Cargando…</div></div></div>
+    <div class="toolbar">
+      <div class="seg" id="heatMode">
+        <button data-hm="gex" class="active">GEX</button>
+        <button data-hm="dex">DEX</button>
+      </div>
+      <span class="hint">azul = positivo · rojo = negativo · por días a vencimiento (DTE)</span>
+    </div>
+    <div class="panel heatwrap"><div id="gexHeat" class="heattable"><div class="loading" style="padding:16px">Cargando…</div></div></div>
   </section>
 
   <!-- ── OI / % OI ── -->

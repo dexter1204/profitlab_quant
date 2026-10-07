@@ -40,6 +40,7 @@
     pick: DEFAULT_TICKER,          // what the user selected (may be a future)
     symbol: DEFAULT_TICKER,        // resolved symbol the API loads
     oiMode: "oi",
+    heatMode: "gex",               // GEX/DEX heatmap table: gex | dex
     regimeMode: "gex",             // Gamma&Flow right column: gex | dex
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
@@ -267,31 +268,61 @@
     Plotly.react(el("priceChart"), traces, layout, CONFIG);
   }
 
-  // ── view 3: GEX HEATMAP (strike × expiry) ─────────────────────────────────
+  // ── view 3: GEX / DEX HEATMAP (strike × DTE table, SpotGamma-style) ───────
+  // Compact value label without a currency sign: 40.2M, -128.3M, 973.6K…
+  function fmtHeat(v) {
+    if (v == null || !isFinite(v)) return "";
+    const a = Math.abs(v), s = v < 0 ? "-" : "";
+    if (a >= 1e9) return `${s}${(a / 1e9).toFixed(1)}B`;
+    if (a >= 1e6) return `${s}${(a / 1e6).toFixed(1)}M`;
+    if (a >= 1e3) return `${s}${Math.round(a / 1e3)}K`;
+    return `${s}${a.toFixed(0)}`;
+  }
+  // Diverging cell background: blue for positive, red for negative, intensity
+  // by magnitude relative to the grid max (gamma sqrt so small cells still show).
+  function heatColor(v, amax) {
+    if (v == null || !isFinite(v) || v === 0) return "rgba(255,255,255,.02)";
+    const t = Math.min(Math.abs(v) / amax, 1);
+    const alpha = 0.14 + 0.80 * Math.pow(t, 0.55);
+    return v > 0 ? `rgba(37,99,235,${alpha.toFixed(3)})`   // blue  #2563eb
+                 : `rgba(220,38,38,${alpha.toFixed(3)})`;  // red   #dc2626
+  }
+  let _heatData = null;
   function renderGexHeat(d) {
-    const z = d.z || [], strikes = d.strikes || [], expiries = d.expiries || [];
-    // diverging red→green centered at zero
-    const flat = z.flat().filter((v) => v != null && isFinite(v));
-    const amax = flat.length ? Math.max(...flat.map(Math.abs)) : 1;
-    const heat = {
-      type: "heatmap", z, x: expiries, y: strikes,
-      zmid: 0, zmin: -amax, zmax: amax,
-      colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]],
-      colorbar: { title: { text: "GEX", side: "right", font: { size: 9 } },
-        tickfont: { size: 8 }, thickness: 10 },
-      hovertemplate: "Expiry %{x}<br>Strike %{y}<br>GEX %{z:$,.0f}<extra></extra>",
-    };
-    const shapes = [];
-    if (d.spot != null && isFinite(d.spot)) {
-      shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: d.spot, y1: d.spot,
-        line: { color: C.text, width: 1.4, dash: "dot" } });
-    }
-    const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 62, r: 20, t: 30, b: 70 }, shapes,
-      xaxis: { title: { text: "Expiry", font: { size: 10 } }, tickangle: -40, tickfont: { size: 9 } },
-      yaxis: { title: { text: "Strike", font: { size: 10 } }, tickfont: { size: 10 } },
-    });
-    Plotly.react(el("gexHeat"), [heat], layout, CONFIG);
+    if (d) _heatData = d;
+    d = _heatData;
+    if (!d) return;
+    const mode = state.heatMode === "dex" ? "dex" : "gex";
+    const strikes = d.strikes || [];
+    const Z = (mode === "dex" ? d.z_dex : d.z_gex) || d.z || [];
+    const labels = (d.dte && d.dte.length)
+      ? d.dte.map((x) => `${x}D`)
+      : (d.expiries || []).map((e) => (e || "").slice(5));
+
+    let amax = 1;
+    for (const row of Z) for (const v of (row || []))
+      if (v != null && isFinite(v)) amax = Math.max(amax, Math.abs(v));
+
+    // nearest strike to spot → SPOT row
+    let spotIdx = -1, best = Infinity;
+    strikes.forEach((s, i) => { const g = Math.abs(s - (d.spot || 0)); if (g < best) { best = g; spotIdx = i; } });
+    // rows top-to-bottom = highest strike first
+    const order = strikes.map((_, i) => i).sort((a, b) => strikes[b] - strikes[a]);
+
+    const title = mode === "dex" ? "DELTA EXPOSURE" : "GAMMA EXPOSURE";
+    const head = `<tr><th class="hc sk">STRIKE</th>` +
+      labels.map((l, j) => `<th class="hc${j === 0 ? " c0" : ""}">${l}</th>`).join("") + `</tr>`;
+    const body = order.map((i) => {
+      const spot = i === spotIdx;
+      const cells = (Z[i] || []).map((v) =>
+        `<td style="background:${heatColor(v, amax)}">${fmtHeat(v)}</td>`).join("");
+      return `<tr class="${spot ? "spotrow" : ""}">` +
+        `<th class="sk">$${fmtLevel(strikes[i])}${spot ? "<i>SPOT</i>" : ""}</th>${cells}</tr>`;
+    }).join("");
+
+    el("gexHeat").innerHTML = `
+      <div class="heat-top"><span class="ht-title">${title}</span><span class="ht-sub">Strike × Expiry</span></div>
+      <div class="heat-scroll"><table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
   // ── view 4: OI / % OI ──────────────────────────────────────────────────────
@@ -621,6 +652,15 @@
       for (const x of el("oiMode").querySelectorAll("button"))
         x.classList.toggle("active", x === b);
       drawOI();   // redraw from cached data, no refetch
+    });
+
+    // GEX / DEX toggle on the heatmap table (re-render from cache, no refetch)
+    el("heatMode").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.heatMode = b.dataset.hm;
+      for (const x of el("heatMode").querySelectorAll("button"))
+        x.classList.toggle("active", x === b);
+      renderGexHeat();
     });
 
     // segmented toggles that switch which endpoint a view loads
