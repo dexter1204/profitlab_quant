@@ -366,13 +366,16 @@
     const flat = Zt.flat();
     // robust colour scale (88th percentile) so more of the surface gets colour
     const cScale = _pctAbs(flat, 0.88) * 1.05;
+    // robust HEIGHT scale: real chains have one huge ATM/0DTE cell that would
+    // otherwise dominate the z-axis and flatten everything else to the base.
+    // tanh(z / R) saturates that outlier and gives the whole terrain relief.
+    const R = _pctAbs(flat, 0.75) || 1;
     const use3d = state.surf3d && webglOK();
 
     if (use3d) {
-      const Zdisp = Zt.map((row) => row.map(specComp));          // compressed height
-      const txt = Zt.map((row) => row.map((v) => fmtBig(v)));    // true $ in hover
-      let dispMax = 0.001;
-      for (const row of Zdisp) for (const v of row) dispMax = Math.max(dispMax, Math.abs(v));
+      const Zdisp = Zt.map((row) => row.map((v) => Math.tanh(v / R)));  // bounded ~[-1,1]
+      const txt = Zt.map((row) => row.map((v) => fmtBig(v)));           // true $ in hover
+      const dispMax = 1;
 
       const surf = {
         type: "surface", z: Zdisp, x: strikes, y: dte,
@@ -410,8 +413,8 @@
           xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
           yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 1.3, y: -1.5, z: 0.52 }, center: { x: 0, y: 0, z: -0.16 } },
-          aspectratio: { x: 1.9, y: 0.95, z: 1.3 },
+          camera: { eye: { x: 1.4, y: -1.55, z: 0.78 }, center: { x: 0, y: 0, z: -0.05 } },
+          aspectratio: { x: 1.9, y: 1.0, z: 1.05 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
@@ -685,7 +688,7 @@
                  return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
                render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
-    spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=26`, render: renderSpectrum },
+    spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=26&exp=8`, render: renderSpectrum },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,

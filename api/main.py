@@ -313,15 +313,17 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
 
 
 @app.get("/api/gex_heatmap/{ticker}", dependencies=GATED)
-def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
+def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60),
+                exp: int = Query(4, ge=1, le=12)):
     """GEX **and** DEX on a strike × days-to-expiry grid — the exposure heat
     map table. Returns dense matrices `z_gex`/`z_dex` (indexed
     [strike_index][col_index]) plus the strike and DTE-column axes, so the
-    frontend can toggle GEX↔DEX without a refetch."""
+    frontend can toggle GEX↔DEX without a refetch. `exp` sets how many
+    expiries deep the grid goes (the Espectro 3D view asks for more)."""
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
+        chain = pdata.option_chain(ticker, max_expiries=exp)
         spot = pdata.spot(ticker)
         asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
         ctx = exposures.ChainContext(spot=spot, asof=asof)
@@ -357,7 +359,7 @@ def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60)):
         }
 
     try:
-        return _cached(f"gexheat:{ticker}:{window}", _compute)
+        return _cached(f"gexheat:{ticker}:{window}:{exp}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
