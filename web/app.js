@@ -369,7 +369,9 @@
     // robust HEIGHT scale: real chains have one huge ATM/0DTE cell that would
     // otherwise dominate the z-axis and flatten everything else to the base.
     // tanh(z / R) saturates that outlier and gives the whole terrain relief.
-    const R = _pctAbs(flat, 0.72) || 1;         // robust height scale (tanh)
+    // Higher percentile → gentler saturation → the big peaks tower over the
+    // base instead of all flattening to the same height (more dramatic spikes).
+    const R = _pctAbs(flat, 0.88) || 1;         // robust height scale (tanh)
     const disp = (v) => Math.tanh((Number(v) || 0) / R);   // bounded ~[-1,1]
     const use3d = state.surf3d && webglOK();
 
@@ -382,12 +384,8 @@
       const nS = strikes.length, nD = dte.length;
       // y = expiry index (even spacing) → clearly separated rows
       const yIdx = dte.map((_, j) => j);
-      // tanh height, with light smoothing ACROSS STRIKES only (keeps rows crisp)
-      const Zh = Zt.map((row) => row.map((v, i) => {
-        const a = disp(row[i - 1]), b = disp(v), c = disp(row[i + 1]);
-        const vals = [a, b, c].filter((x) => x != null && isFinite(x));
-        return vals.reduce((s, x) => s + x, 0) / vals.length;
-      }));
+      // raw tanh height (no smoothing) so each strike keeps its sharp peak
+      const Zh = Zt.map((row) => row.map((v) => disp(v)));
       const txt = Zt.map((row) => row.map((v) => fmtBig(v)));
 
       const surf = {
@@ -426,8 +424,8 @@
           yaxis: Object.assign(SCENE_AX("Vencimiento"), { tickfont: { size: 9 },
             tickmode: "array", tickvals: yIdx, ticktext: dte.map((dd) => `${dd}D`) }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 0.7, y: -2.0, z: 0.55 }, center: { x: 0, y: 0, z: -0.08 } },
-          aspectratio: { x: 2.6, y: 1.1, z: 0.55 },
+          camera: { eye: { x: 0.85, y: -1.85, z: 0.6 }, center: { x: 0, y: 0, z: -0.04 } },
+          aspectratio: { x: 2.4, y: 1.0, z: 1.25 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
