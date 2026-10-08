@@ -14,3 +14,7 @@ venv/
 # local sqlite dev db
 profitlab.db
 *.sqlite3
+
+# distribution bundle (built for SiteGround upload, not source)
+quantsistem-web.zip
+*.zip
