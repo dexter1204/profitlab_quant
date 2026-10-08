@@ -336,7 +336,7 @@
   ];
   // signed power-compression of the surface height so secondary ridges rise
   // relative to the tallest spike (true $ value stays in the hover/colour).
-  const specComp = (v) => (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), 0.68);
+  const specComp = (v) => (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), 0.80);
   function _pctAbs(flat, p) {
     const a = flat.filter((v) => v && isFinite(v)).map(Math.abs).sort((x, y) => x - y);
     if (!a.length) return 1;
@@ -390,7 +390,7 @@
       let aggMax = 1; for (const v of agg) aggMax = Math.max(aggMax, Math.abs(v));
       const ridge = {
         type: "scatter3d", mode: "lines", x: strikes, y: strikes.map(() => dte[0]),
-        z: agg.map((v) => (v / aggMax) * dispMax), line: { color: "#f8fafc", width: 3 },
+        z: agg.map((v) => (v / aggMax) * dispMax * 0.72), line: { color: "#f8fafc", width: 3 },
         name: "Perfil neto", hovertemplate: "Strike %{x:,.0f}<br>perfil neto<extra></extra>",
       };
       const traces = [surf, ridge];
@@ -410,8 +410,8 @@
           xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
           yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 1.25, y: -1.35, z: 0.55 }, center: { x: 0, y: 0, z: -0.08 } },
-          aspectratio: { x: 1.85, y: 1.05, z: 0.92 },
+          camera: { eye: { x: 1.3, y: -1.5, z: 0.52 }, center: { x: 0, y: 0, z: -0.16 } },
+          aspectratio: { x: 1.9, y: 0.95, z: 1.3 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
