@@ -330,9 +330,18 @@
   // Diverging surface centered at zero: green ridges = positive Net (C−P)
   // exposure, red valleys = negative — the "spectrum" look.
   const SPECTRUM_SCALE = [
-    [0.0, "#ef4444"], [0.32, "rgba(239,68,68,.35)"], [0.5, "rgba(13,18,32,.15)"],
-    [0.68, "rgba(34,197,94,.35)"], [1.0, "#22c55e"],
+    [0.0, "#ef4444"], [0.28, "rgba(239,68,68,.78)"], [0.47, "rgba(120,30,40,.25)"],
+    [0.5, "rgba(20,26,43,.10)"], [0.53, "rgba(30,90,55,.25)"],
+    [0.72, "rgba(34,197,94,.78)"], [1.0, "#22c55e"],
   ];
+  // signed power-compression of the surface height so secondary ridges rise
+  // relative to the tallest spike (true $ value stays in the hover/colour).
+  const specComp = (v) => (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), 0.68);
+  function _pctAbs(flat, p) {
+    const a = flat.filter((v) => v && isFinite(v)).map(Math.abs).sort((x, y) => x - y);
+    if (!a.length) return 1;
+    return a[Math.min(a.length - 1, Math.floor(p * a.length))] || a[a.length - 1] || 1;
+  }
   let _spectrumData = null;
   function renderSpectrum(d) {
     if (d) _spectrumData = d;
@@ -344,66 +353,85 @@
     const Z = (mode === "dex" ? d.z_dex : d.z_gex) || d.z || [];   // [strike][dte]
     const M = mode.toUpperCase();
 
+    // header above the plot
+    const tEl = el("spectrumTitle"), sEl = el("spectrumSub");
+    if (tEl) tEl.textContent = `VISTA ESPECTRO · ${d.ticker || ""} · Spot $${fmtLevel(d.spot)}`;
+    if (sEl) sEl.textContent = `${M} NET (C−P)`;
+
     // transpose to [dte][strike] so x = strike (front axis), y = DTE (depth)
     const Zt = dte.map((_, j) => strikes.map((_, i) => {
       const v = (Z[i] || [])[j];
       return (v == null || !isFinite(v)) ? 0 : v;
     }));
-    let amax = 1;
-    for (const row of Zt) for (const v of row) amax = Math.max(amax, Math.abs(v));
-
-    const title = `${mode === "dex" ? "DELTA" : "GAMMA"} EXPOSURE · Net (C−P)`;
+    const flat = Zt.flat();
+    // robust colour scale (88th percentile) so more of the surface gets colour
+    const cScale = _pctAbs(flat, 0.88) * 1.05;
     const use3d = state.surf3d && webglOK();
 
     if (use3d) {
+      const Zdisp = Zt.map((row) => row.map(specComp));          // compressed height
+      const txt = Zt.map((row) => row.map((v) => fmtBig(v)));    // true $ in hover
+      let dispMax = 0.001;
+      for (const row of Zdisp) for (const v of row) dispMax = Math.max(dispMax, Math.abs(v));
+
       const surf = {
-        type: "surface", z: Zt, x: strikes, y: dte,
-        colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -amax, cmax: amax, opacity: 0.92,
-        contours: { z: { show: false } },
-        lighting: { ambient: 0.75, diffuse: 0.5, specular: 0.1, roughness: 0.9 },
-        colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
-        hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
+        type: "surface", z: Zdisp, x: strikes, y: dte,
+        surfacecolor: Zt, colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -cScale, cmax: cScale,
+        opacity: 1.0, contours: { z: { show: false } },
+        lighting: { ambient: 0.82, diffuse: 0.55, specular: 0.12, roughness: 0.85 },
+        colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
+          thickness: 10, len: 0.7, tickformat: "$~s" },
+        text: txt, hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{text}<extra></extra>",
       };
-      // white ridge line = net profile per strike (summed across expiries), on the front edge
+      // white ridge line = net profile per strike (summed over expiries), front edge
       const agg = strikes.map((_, i) => {
         let s = 0; for (let j = 0; j < Zt.length; j++) s += Zt[j][i] || 0; return s;
       });
       let aggMax = 1; for (const v of agg) aggMax = Math.max(aggMax, Math.abs(v));
-      const ridgeZ = agg.map((v) => (v / aggMax) * amax);
       const ridge = {
         type: "scatter3d", mode: "lines", x: strikes, y: strikes.map(() => dte[0]),
-        z: ridgeZ, line: { color: "#f8fafc", width: 5 }, name: "Net profile",
-        hovertemplate: "Strike %{x:,.0f}<br>Net " + M + " (perfil)<extra></extra>",
+        z: agg.map((v) => (v / aggMax) * dispMax), line: { color: "#f8fafc", width: 3 },
+        name: "Perfil neto", hovertemplate: "Strike %{x:,.0f}<br>perfil neto<extra></extra>",
       };
+      const traces = [surf, ridge];
+      // SPOT marker: a vertical cyan line at the spot strike
+      if (d.spot != null && isFinite(d.spot)) {
+        traces.push({
+          type: "scatter3d", mode: "lines",
+          x: [d.spot, d.spot], y: [dte[0], dte[dte.length - 1]], z: [0, 0],
+          line: { color: C.cyan, width: 4 }, name: "Spot",
+          hovertemplate: `SPOT $${fmtLevel(d.spot)}<extra></extra>`,
+        });
+      }
       const layout = Object.assign({}, BASE_LAYOUT, {
-        margin: { l: 0, r: 0, t: 12, b: 0 }, showlegend: false,
-        annotations: [],
+        margin: { l: 0, r: 0, t: 0, b: 0 }, showlegend: false,
         scene: {
           dragmode: "turntable", bgcolor: "rgba(0,0,0,0)",
-          xaxis: SCENE_AX("Strike"), yaxis: SCENE_AX("Días a vencimiento"),
-          zaxis: SCENE_AX(`Net ${M}`),
-          camera: { eye: { x: 1.7, y: -1.6, z: 0.75 } }, aspectratio: { x: 1.5, y: 1, z: 0.6 },
+          xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
+          yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
+          zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
+          camera: { eye: { x: 1.25, y: -1.35, z: 0.55 }, center: { x: 0, y: 0, z: -0.08 } },
+          aspectratio: { x: 1.85, y: 1.05, z: 0.92 },
         },
       });
-      Plotly.react(el("spectrum"), [surf, ridge], layout, { responsive: true, displayModeBar: false });
+      Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
       return;
     }
     // 2-D fallback heatmap
     const heat = {
-      type: "heatmap", z: Zt, x: strikes, y: dte, zmid: 0, zmin: -amax, zmax: amax,
+      type: "heatmap", z: Zt, x: strikes, y: dte, zmid: 0, zmin: -cScale, zmax: cScale,
       colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]],
-      colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+      colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
+        thickness: 10, tickformat: "$~s" },
       hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
     };
     const shapes = [];
     if (d.spot != null && isFinite(d.spot)) {
       shapes.push({ type: "line", xref: "x", x0: d.spot, x1: d.spot, yref: "paper", y0: 0, y1: 1,
-        line: { color: C.text, width: 1.3, dash: "dot" } });
+        line: { color: C.cyan, width: 1.4, dash: "dot" } });
     }
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 50, r: 20, t: 36, b: 44 }, shapes,
-      annotations: [{ xref: "paper", yref: "paper", x: 0, xanchor: "left", y: 1.07, yanchor: "bottom",
-        showarrow: false, text: title, font: { size: 11, color: C.green } }],
+      margin: { l: 50, r: 20, t: 16, b: 44 }, shapes,
       xaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 9 } },
       yaxis: { title: { text: "Días a vencimiento", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 9 } },
     });
