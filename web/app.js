@@ -369,40 +369,68 @@
     // robust HEIGHT scale: real chains have one huge ATM/0DTE cell that would
     // otherwise dominate the z-axis and flatten everything else to the base.
     // tanh(z / R) saturates that outlier and gives the whole terrain relief.
-    const R = _pctAbs(flat, 0.75) || 1;
+    const R = _pctAbs(flat, 0.72) || 1;         // robust height scale (tanh)
+    const disp = (v) => Math.tanh((Number(v) || 0) / R);   // bounded ~[-1,1]
     const use3d = state.surf3d && webglOK();
 
     if (use3d) {
-      const Zdisp = Zt.map((row) => row.map((v) => Math.tanh(v / R)));  // bounded ~[-1,1]
-      const txt = Zt.map((row) => row.map((v) => fmtBig(v)));           // true $ in hover
-      const dispMax = 1;
-
-      const surf = {
-        type: "surface", z: Zdisp, x: strikes, y: dte,
-        surfacecolor: Zt, colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -cScale, cmax: cScale,
-        opacity: 1.0, contours: { z: { show: false } },
-        lighting: { ambient: 0.82, diffuse: 0.55, specular: 0.12, roughness: 0.85 },
-        colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
-          thickness: 10, len: 0.7, tickformat: "$~s" },
-        text: txt, hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{text}<extra></extra>",
+      // Filled translucent ridges — one green/red profile per expiry, receding
+      // in depth. Robust whether exposure is concentrated (QQQ) or spread
+      // out (ASML): each expiry is its own filled curve, so there are no ugly
+      // cross-strike surface triangles and no single cell can flatten it.
+      const nS = strikes.length, nD = dte.length;
+      const vx = [], vy = [], vz = [], vc = [], Ti = [], Tj = [], Tk = [];
+      const colAt = (v) => {
+        const t = Math.min(Math.abs(v) / cScale, 1);
+        const a = (0.20 + 0.65 * t).toFixed(3);
+        return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
       };
-      // white ridge line = net profile per strike (summed over expiries), front edge
-      const agg = strikes.map((_, i) => {
-        let s = 0; for (let j = 0; j < Zt.length; j++) s += Zt[j][i] || 0; return s;
-      });
-      let aggMax = 1; for (const v of agg) aggMax = Math.max(aggMax, Math.abs(v));
-      const ridge = {
+      for (let j = 0; j < nD; j++) {
+        const yv = dte[j], base = vx.length;
+        for (let i = 0; i < nS; i++) {
+          const v = Zt[j][i] || 0, col = colAt(v);
+          vx.push(strikes[i], strikes[i]);
+          vy.push(yv, yv);
+          vz.push(0, disp(v));           // base vertex, top vertex
+          vc.push(col, col);
+        }
+        for (let i = 0; i < nS - 1; i++) {
+          const a = base + 2 * i, b = a + 1, c = a + 2, dd = a + 3;
+          Ti.push(a, a); Tj.push(b, dd); Tk.push(dd, c);
+        }
+      }
+      const mesh = {
+        type: "mesh3d", x: vx, y: vy, z: vz, i: Ti, j: Tj, k: Tk,
+        vertexcolor: vc, opacity: 0.80, flatshading: true, hoverinfo: "skip", name: M,
+      };
+      const traces = [mesh];
+      // crisp white outline on just the front expiry (keeps it clean)
+      traces.push({
         type: "scatter3d", mode: "lines", x: strikes, y: strikes.map(() => dte[0]),
-        z: agg.map((v) => (v / aggMax) * dispMax * 0.72), line: { color: "#f8fafc", width: 3 },
-        name: "Perfil neto", hovertemplate: "Strike %{x:,.0f}<br>perfil neto<extra></extra>",
-      };
-      const traces = [surf, ridge];
+        z: strikes.map((_, i) => disp(Zt[0][i] || 0)), hoverinfo: "skip", showlegend: false,
+        line: { color: "#f8fafc", width: 2.5 },
+      });
+      // invisible hover points on the front expiry with the true $ value
+      traces.push({
+        type: "scatter3d", mode: "markers", x: strikes, y: strikes.map(() => dte[0]),
+        z: strikes.map((_, i) => disp(Zt[0][i] || 0)), showlegend: false,
+        marker: { size: 3, color: "rgba(0,0,0,0)" },
+        text: strikes.map((_, i) => fmtBig(Zt[0][i] || 0)),
+        hovertemplate: "Strike %{x:,.0f}<br>" + M + " %{text}<extra></extra>",
+      });
+      // hidden point just to render the colour legend
+      traces.push({
+        type: "scatter3d", mode: "markers", x: [strikes[0]], y: [dte[0]], z: [0], hoverinfo: "skip",
+        showlegend: false, marker: { size: 0.1, color: [0], cmin: -cScale, cmax: cScale,
+          colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]], showscale: true,
+          colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
+            thickness: 10, len: 0.7, tickformat: "$~s" } },
+      });
       // SPOT marker: a vertical cyan line at the spot strike
       if (d.spot != null && isFinite(d.spot)) {
         traces.push({
-          type: "scatter3d", mode: "lines",
-          x: [d.spot, d.spot], y: [dte[0], dte[dte.length - 1]], z: [0, 0],
-          line: { color: C.cyan, width: 4 }, name: "Spot",
+          type: "scatter3d", mode: "lines", x: [d.spot, d.spot], y: [dte[0], dte[nD - 1]], z: [0, 0],
+          line: { color: C.cyan, width: 4 }, showlegend: false,
           hovertemplate: `SPOT $${fmtLevel(d.spot)}<extra></extra>`,
         });
       }
@@ -413,8 +441,8 @@
           xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
           yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 1.4, y: -1.55, z: 0.78 }, center: { x: 0, y: 0, z: -0.05 } },
-          aspectratio: { x: 1.9, y: 1.0, z: 1.05 },
+          camera: { eye: { x: 1.5, y: -1.6, z: 0.6 }, center: { x: 0, y: 0, z: -0.05 } },
+          aspectratio: { x: 1.9, y: 1.0, z: 0.85 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
