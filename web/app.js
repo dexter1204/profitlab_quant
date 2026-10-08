@@ -374,71 +374,60 @@
     const use3d = state.surf3d && webglOK();
 
     if (use3d) {
-      // REAL 3-D: a continuous surface that fills the whole strike × expiry
-      // plane (width AND depth), bilinearly upsampled so it reads as solid,
-      // voluminous terrain instead of thin separate curtains. tanh height
-      // keeps the ATM/0DTE outlier from flattening everything else.
+      // REAL 3-D terrain, read as DISTINCT expiry ROWS across a WIDE strike
+      // axis. Expiries are placed on an EVEN depth grid (by index, labelled
+      // with their real DTE) so near-dated expiries still separate into their
+      // own rows instead of collapsing into one column. Strikes stay crisp so
+      // each level is legible; tanh height tames the ATM/0DTE outlier.
       const nS = strikes.length, nD = dte.length;
-      const NS = Math.min((nS - 1) * 2 + 1, 161);          // denser strike grid
-      const ND = Math.max(nD, Math.min((nD - 1) * 6 + 1, 49));  // much deeper
-      const lin = (a, b, n, k) => a + (b - a) * (n <= 1 ? 0 : k / (n - 1));
-      const sampleRow = (arr, f) => {           // linear interp along an array
-        const j0 = Math.floor(f), j1 = Math.min(j0 + 1, arr.length - 1), t = f - j0;
-        return (arr[j0] || 0) * (1 - t) + (arr[j1] || 0) * t;
-      };
-      const dx = [], dy = [], dZraw = [];
-      for (let b = 0; b < NS; b++) dx.push(lin(strikes[0], strikes[nS - 1], NS, b));
-      for (let a = 0; a < ND; a++) {
-        const fy = (ND <= 1) ? 0 : a / (ND - 1) * (nD - 1);
-        dy.push(sampleRow(dte, fy));
-        const j0 = Math.floor(fy), j1 = Math.min(j0 + 1, nD - 1), ty = fy - j0;
-        const row = [];
-        for (let b = 0; b < NS; b++) {
-          const fx = (NS <= 1) ? 0 : b / (NS - 1) * (nS - 1);
-          const v0 = sampleRow(Zt[j0] || [], fx), v1 = sampleRow(Zt[j1] || [], fx);
-          row.push(v0 * (1 - ty) + v1 * ty);     // bilinear
-        }
-        dZraw.push(row);
-      }
-      // light 3×3 smoothing on the display height so it reads as rolling terrain
-      const Zh = dZraw.map((row, a) => row.map((_, b) => {
-        let s = 0, n = 0;
-        for (let p = -1; p <= 1; p++) for (let q = -1; q <= 1; q++) {
-          const r = dZraw[a + p]; if (!r) continue; const v = r[b + q];
-          if (v == null) continue; s += disp(v); n++;
-        }
-        return n ? s / n : disp(dZraw[a][b]);
+      // y = expiry index (even spacing) → clearly separated rows
+      const yIdx = dte.map((_, j) => j);
+      // tanh height, with light smoothing ACROSS STRIKES only (keeps rows crisp)
+      const Zh = Zt.map((row) => row.map((v, i) => {
+        const a = disp(row[i - 1]), b = disp(v), c = disp(row[i + 1]);
+        const vals = [a, b, c].filter((x) => x != null && isFinite(x));
+        return vals.reduce((s, x) => s + x, 0) / vals.length;
       }));
-      const txt = dZraw.map((row) => row.map((v) => fmtBig(v)));
+      const txt = Zt.map((row) => row.map((v) => fmtBig(v)));
 
       const surf = {
-        type: "surface", z: Zh, x: dx, y: dy, surfacecolor: dZraw,
-        colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -cScale, cmax: cScale, opacity: 0.96,
-        contours: { z: { show: false } },
-        lighting: { ambient: 0.72, diffuse: 0.7, specular: 0.18, roughness: 0.6, fresnel: 0.2 },
-        lightposition: { x: 0, y: -100, z: 100 },
+        type: "surface", z: Zh, x: strikes, y: yIdx, surfacecolor: Zt,
+        colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -cScale, cmax: cScale, opacity: 0.97,
+        contours: {
+          x: { show: true, color: "rgba(255,255,255,.08)", width: 1 },      // strike grid lines
+          y: { show: true, color: "rgba(255,255,255,.15)", width: 1 },      // row dividers
+          z: { show: false },
+        },
+        lighting: { ambient: 0.78, diffuse: 0.6, specular: 0.12, roughness: 0.75 },
         colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
           thickness: 10, len: 0.7, tickformat: "$~s" },
-        text: txt, hovertemplate: "Strike %{x:,.0f}<br>%{y:.0f}D<br>" + M + " %{text}<extra></extra>",
+        text: txt, customdata: dte.map((dd) => strikes.map(() => dd)),
+        hovertemplate: "Strike %{x:,.0f}<br>%{customdata}D<br>" + M + " %{text}<extra></extra>",
       };
       const traces = [surf];
-      // SPOT marker: a vertical cyan line at the spot strike
+      // SPOT marker: a vertical cyan line at the spot strike across all rows
       if (d.spot != null && isFinite(d.spot)) {
         traces.push({
-          type: "scatter3d", mode: "lines", x: [d.spot, d.spot], y: [dte[0], dte[nD - 1]], z: [0, 0],
-          line: { color: C.cyan, width: 4 }, showlegend: false,
+          type: "scatter3d", mode: "lines", x: [d.spot, d.spot], y: [0, nD - 1], z: [0, 0],
+          line: { color: C.cyan, width: 5 }, showlegend: false,
           hovertemplate: `SPOT $${fmtLevel(d.spot)}<extra></extra>`,
         });
       }
+      // nice strike tick step (~10 labels), rounded to 5/10/25…
+      const span = (strikes[nS - 1] - strikes[0]) || 1;
+      const raw = span / 9, pow = Math.pow(10, Math.floor(Math.log10(raw)));
+      const dtick = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw) || pow * 10;
       const layout = Object.assign({}, BASE_LAYOUT, {
         margin: { l: 0, r: 0, t: 0, b: 0 }, showlegend: false,
         scene: {
           dragmode: "turntable", bgcolor: "rgba(0,0,0,0)",
-          xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
-          yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
+          xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 10 }, dtick,
+            tick0: Math.ceil(strikes[0] / dtick) * dtick }),
+          yaxis: Object.assign(SCENE_AX("Vencimiento"), { tickfont: { size: 9 },
+            tickmode: "array", tickvals: yIdx, ticktext: dte.map((dd) => `${dd}D`) }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 1.45, y: -1.5, z: 0.72 }, center: { x: 0, y: 0, z: -0.05 } },
-          aspectratio: { x: 1.7, y: 1.3, z: 0.8 },
+          camera: { eye: { x: 0.7, y: -2.0, z: 0.55 }, center: { x: 0, y: 0, z: -0.08 } },
+          aspectratio: { x: 2.6, y: 1.1, z: 0.55 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
@@ -712,7 +701,7 @@
                  return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
                render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
-    spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=26&exp=8`, render: renderSpectrum },
+    spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=30&exp=10`, render: renderSpectrum },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
