@@ -173,6 +173,7 @@
     <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
     <button class="tab" data-view="chart">Chart</button>
     <button class="tab" data-view="gexheat">GEX Heatmap</button>
+    <button class="tab" data-view="spectrum">Espectro 3D</button>
     <button class="tab" data-view="oi">OI / % OI</button>
     <button class="tab" data-view="flow">Big Trades</button>
     <button class="tab" data-view="dsurf">Delta Surface</button>
@@ -216,6 +217,22 @@
       <span class="hint">azul = positivo · rojo = negativo · por días a vencimiento (DTE)</span>
     </div>
     <div class="panel heatwrap"><div id="gexHeat" class="heattable"><div class="loading" style="padding:16px">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── ESPECTRO 3D (GEX/DEX surface) ── -->
+  <section id="view-spectrum" class="view hidden">
+    <div class="toolbar">
+      <div class="seg" id="spectrumMode">
+        <button data-sm="gex" class="active">GEX</button>
+        <button data-sm="dex">DEX</button>
+      </div>
+      <div class="seg surf3dToggle">
+        <button data-s3d="3d" class="active">3D</button>
+        <button data-s3d="2d">2D</button>
+      </div>
+      <span class="hint">Superficie espectral Net (C−P) sobre strike × vencimiento · verde = positivo, rojo = negativo · arrastra para rotar</span>
+    </div>
+    <div class="panel"><div id="spectrum" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
   <!-- ── OI / % OI ── -->

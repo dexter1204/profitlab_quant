@@ -41,6 +41,7 @@
     symbol: DEFAULT_TICKER,        // resolved symbol the API loads
     oiMode: "oi",
     heatMode: "gex",               // GEX/DEX heatmap table: gex | dex
+    spectrumMode: "gex",           // Espectro 3D surface: gex | dex
     regimeMode: "gex",             // Gamma&Flow right column: gex | dex
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
@@ -325,6 +326,90 @@
       <div class="heat-scroll"><table class="heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
+  // ── view 3b: ESPECTRO 3D (GEX/DEX Net surface over strike × expiry) ───────
+  // Diverging surface centered at zero: green ridges = positive Net (C−P)
+  // exposure, red valleys = negative — the "spectrum" look.
+  const SPECTRUM_SCALE = [
+    [0.0, "#ef4444"], [0.32, "rgba(239,68,68,.35)"], [0.5, "rgba(13,18,32,.15)"],
+    [0.68, "rgba(34,197,94,.35)"], [1.0, "#22c55e"],
+  ];
+  let _spectrumData = null;
+  function renderSpectrum(d) {
+    if (d) _spectrumData = d;
+    d = _spectrumData;
+    if (!d) return;
+    const mode = state.spectrumMode === "dex" ? "dex" : "gex";
+    const strikes = d.strikes || [];
+    const dte = (d.dte && d.dte.length) ? d.dte : (d.expiries || []).map((_, i) => i);
+    const Z = (mode === "dex" ? d.z_dex : d.z_gex) || d.z || [];   // [strike][dte]
+    const M = mode.toUpperCase();
+
+    // transpose to [dte][strike] so x = strike (front axis), y = DTE (depth)
+    const Zt = dte.map((_, j) => strikes.map((_, i) => {
+      const v = (Z[i] || [])[j];
+      return (v == null || !isFinite(v)) ? 0 : v;
+    }));
+    let amax = 1;
+    for (const row of Zt) for (const v of row) amax = Math.max(amax, Math.abs(v));
+
+    const title = `${mode === "dex" ? "DELTA" : "GAMMA"} EXPOSURE · Net (C−P)`;
+    const use3d = state.surf3d && webglOK();
+
+    if (use3d) {
+      const surf = {
+        type: "surface", z: Zt, x: strikes, y: dte,
+        colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -amax, cmax: amax, opacity: 0.92,
+        contours: { z: { show: false } },
+        lighting: { ambient: 0.75, diffuse: 0.5, specular: 0.1, roughness: 0.9 },
+        colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+        hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
+      };
+      // white ridge line = net profile per strike (summed across expiries), on the front edge
+      const agg = strikes.map((_, i) => {
+        let s = 0; for (let j = 0; j < Zt.length; j++) s += Zt[j][i] || 0; return s;
+      });
+      let aggMax = 1; for (const v of agg) aggMax = Math.max(aggMax, Math.abs(v));
+      const ridgeZ = agg.map((v) => (v / aggMax) * amax);
+      const ridge = {
+        type: "scatter3d", mode: "lines", x: strikes, y: strikes.map(() => dte[0]),
+        z: ridgeZ, line: { color: "#f8fafc", width: 5 }, name: "Net profile",
+        hovertemplate: "Strike %{x:,.0f}<br>Net " + M + " (perfil)<extra></extra>",
+      };
+      const layout = Object.assign({}, BASE_LAYOUT, {
+        margin: { l: 0, r: 0, t: 12, b: 0 }, showlegend: false,
+        annotations: [],
+        scene: {
+          dragmode: "turntable", bgcolor: "rgba(0,0,0,0)",
+          xaxis: SCENE_AX("Strike"), yaxis: SCENE_AX("Días a vencimiento"),
+          zaxis: SCENE_AX(`Net ${M}`),
+          camera: { eye: { x: 1.7, y: -1.6, z: 0.75 } }, aspectratio: { x: 1.5, y: 1, z: 0.6 },
+        },
+      });
+      Plotly.react(el("spectrum"), [surf, ridge], layout, { responsive: true, displayModeBar: false });
+      return;
+    }
+    // 2-D fallback heatmap
+    const heat = {
+      type: "heatmap", z: Zt, x: strikes, y: dte, zmid: 0, zmin: -amax, zmax: amax,
+      colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]],
+      colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
+      hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
+    };
+    const shapes = [];
+    if (d.spot != null && isFinite(d.spot)) {
+      shapes.push({ type: "line", xref: "x", x0: d.spot, x1: d.spot, yref: "paper", y0: 0, y1: 1,
+        line: { color: C.text, width: 1.3, dash: "dot" } });
+    }
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 50, r: 20, t: 36, b: 44 }, shapes,
+      annotations: [{ xref: "paper", yref: "paper", x: 0, xanchor: "left", y: 1.07, yanchor: "bottom",
+        showarrow: false, text: title, font: { size: 11, color: C.green } }],
+      xaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 9 } },
+      yaxis: { title: { text: "Días a vencimiento", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 9 } },
+    });
+    Plotly.react(el("spectrum"), [heat], layout, CONFIG);
+  }
+
   // ── view 4: OI / % OI ──────────────────────────────────────────────────────
   let _oiData = null;
   function renderOI(d) {
@@ -572,6 +657,7 @@
                  return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
                render: renderChart },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
+    spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=26`, render: renderSpectrum },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
@@ -673,6 +759,15 @@
       renderGexHeat();
     });
 
+    // GEX / DEX toggle on the Espectro 3D surface (re-render from cache)
+    el("spectrumMode").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.spectrumMode = b.dataset.sm;
+      for (const x of el("spectrumMode").querySelectorAll("button"))
+        x.classList.toggle("active", x === b);
+      renderSpectrum();
+    });
+
     // segmented toggles that switch which endpoint a view loads
     const segReload = (id, attr, field, view) => {
       el(id).addEventListener("click", (e) => {
@@ -698,6 +793,7 @@
         for (const t of document.querySelectorAll(".surf3dToggle button"))
           t.classList.toggle("active", t.dataset.s3d === b.dataset.s3d);
         if (state.view === "dsurf" && _dsurfData) renderDeltaSurface(_dsurfData);
+        else if (state.view === "spectrum" && _spectrumData) renderSpectrum();
         else if (state.view === "vol" && state.volMode === "surface" && _volSurfData) renderVolSurface(_volSurfData);
         const c = el(VIEWS[state.view].plot);
         if (c && c.data) Plotly.Plots.resize(c);
