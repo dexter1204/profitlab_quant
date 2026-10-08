@@ -374,58 +374,54 @@
     const use3d = state.surf3d && webglOK();
 
     if (use3d) {
-      // Filled translucent ridges — one green/red profile per expiry, receding
-      // in depth. Robust whether exposure is concentrated (QQQ) or spread
-      // out (ASML): each expiry is its own filled curve, so there are no ugly
-      // cross-strike surface triangles and no single cell can flatten it.
+      // REAL 3-D: a continuous surface that fills the whole strike × expiry
+      // plane (width AND depth), bilinearly upsampled so it reads as solid,
+      // voluminous terrain instead of thin separate curtains. tanh height
+      // keeps the ATM/0DTE outlier from flattening everything else.
       const nS = strikes.length, nD = dte.length;
-      const vx = [], vy = [], vz = [], vc = [], Ti = [], Tj = [], Tk = [];
-      const colAt = (v) => {
-        const t = Math.min(Math.abs(v) / cScale, 1);
-        const a = (0.20 + 0.65 * t).toFixed(3);
-        return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
+      const NS = Math.min((nS - 1) * 2 + 1, 161);          // denser strike grid
+      const ND = Math.max(nD, Math.min((nD - 1) * 6 + 1, 49));  // much deeper
+      const lin = (a, b, n, k) => a + (b - a) * (n <= 1 ? 0 : k / (n - 1));
+      const sampleRow = (arr, f) => {           // linear interp along an array
+        const j0 = Math.floor(f), j1 = Math.min(j0 + 1, arr.length - 1), t = f - j0;
+        return (arr[j0] || 0) * (1 - t) + (arr[j1] || 0) * t;
       };
-      for (let j = 0; j < nD; j++) {
-        const yv = dte[j], base = vx.length;
-        for (let i = 0; i < nS; i++) {
-          const v = Zt[j][i] || 0, col = colAt(v);
-          vx.push(strikes[i], strikes[i]);
-          vy.push(yv, yv);
-          vz.push(0, disp(v));           // base vertex, top vertex
-          vc.push(col, col);
+      const dx = [], dy = [], dZraw = [];
+      for (let b = 0; b < NS; b++) dx.push(lin(strikes[0], strikes[nS - 1], NS, b));
+      for (let a = 0; a < ND; a++) {
+        const fy = (ND <= 1) ? 0 : a / (ND - 1) * (nD - 1);
+        dy.push(sampleRow(dte, fy));
+        const j0 = Math.floor(fy), j1 = Math.min(j0 + 1, nD - 1), ty = fy - j0;
+        const row = [];
+        for (let b = 0; b < NS; b++) {
+          const fx = (NS <= 1) ? 0 : b / (NS - 1) * (nS - 1);
+          const v0 = sampleRow(Zt[j0] || [], fx), v1 = sampleRow(Zt[j1] || [], fx);
+          row.push(v0 * (1 - ty) + v1 * ty);     // bilinear
         }
-        for (let i = 0; i < nS - 1; i++) {
-          const a = base + 2 * i, b = a + 1, c = a + 2, dd = a + 3;
-          Ti.push(a, a); Tj.push(b, dd); Tk.push(dd, c);
-        }
+        dZraw.push(row);
       }
-      const mesh = {
-        type: "mesh3d", x: vx, y: vy, z: vz, i: Ti, j: Tj, k: Tk,
-        vertexcolor: vc, opacity: 0.80, flatshading: true, hoverinfo: "skip", name: M,
+      // light 3×3 smoothing on the display height so it reads as rolling terrain
+      const Zh = dZraw.map((row, a) => row.map((_, b) => {
+        let s = 0, n = 0;
+        for (let p = -1; p <= 1; p++) for (let q = -1; q <= 1; q++) {
+          const r = dZraw[a + p]; if (!r) continue; const v = r[b + q];
+          if (v == null) continue; s += disp(v); n++;
+        }
+        return n ? s / n : disp(dZraw[a][b]);
+      }));
+      const txt = dZraw.map((row) => row.map((v) => fmtBig(v)));
+
+      const surf = {
+        type: "surface", z: Zh, x: dx, y: dy, surfacecolor: dZraw,
+        colorscale: SPECTRUM_SCALE, cmid: 0, cmin: -cScale, cmax: cScale, opacity: 0.96,
+        contours: { z: { show: false } },
+        lighting: { ambient: 0.72, diffuse: 0.7, specular: 0.18, roughness: 0.6, fresnel: 0.2 },
+        lightposition: { x: 0, y: -100, z: 100 },
+        colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
+          thickness: 10, len: 0.7, tickformat: "$~s" },
+        text: txt, hovertemplate: "Strike %{x:,.0f}<br>%{y:.0f}D<br>" + M + " %{text}<extra></extra>",
       };
-      const traces = [mesh];
-      // crisp white outline on just the front expiry (keeps it clean)
-      traces.push({
-        type: "scatter3d", mode: "lines", x: strikes, y: strikes.map(() => dte[0]),
-        z: strikes.map((_, i) => disp(Zt[0][i] || 0)), hoverinfo: "skip", showlegend: false,
-        line: { color: "#f8fafc", width: 2.5 },
-      });
-      // invisible hover points on the front expiry with the true $ value
-      traces.push({
-        type: "scatter3d", mode: "markers", x: strikes, y: strikes.map(() => dte[0]),
-        z: strikes.map((_, i) => disp(Zt[0][i] || 0)), showlegend: false,
-        marker: { size: 3, color: "rgba(0,0,0,0)" },
-        text: strikes.map((_, i) => fmtBig(Zt[0][i] || 0)),
-        hovertemplate: "Strike %{x:,.0f}<br>" + M + " %{text}<extra></extra>",
-      });
-      // hidden point just to render the colour legend
-      traces.push({
-        type: "scatter3d", mode: "markers", x: [strikes[0]], y: [dte[0]], z: [0], hoverinfo: "skip",
-        showlegend: false, marker: { size: 0.1, color: [0], cmin: -cScale, cmax: cScale,
-          colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]], showscale: true,
-          colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
-            thickness: 10, len: 0.7, tickformat: "$~s" } },
-      });
+      const traces = [surf];
       // SPOT marker: a vertical cyan line at the spot strike
       if (d.spot != null && isFinite(d.spot)) {
         traces.push({
@@ -441,8 +437,8 @@
           xaxis: Object.assign(SCENE_AX("Strike"), { tickfont: { size: 9 } }),
           yaxis: Object.assign(SCENE_AX("Días a vto."), { tickfont: { size: 9 } }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 1.5, y: -1.6, z: 0.6 }, center: { x: 0, y: 0, z: -0.05 } },
-          aspectratio: { x: 1.9, y: 1.0, z: 0.85 },
+          camera: { eye: { x: 1.45, y: -1.5, z: 0.72 }, center: { x: 0, y: 0, z: -0.05 } },
+          aspectratio: { x: 1.7, y: 1.3, z: 0.8 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
