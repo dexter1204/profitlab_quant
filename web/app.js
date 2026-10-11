@@ -30,6 +30,12 @@
   // la gráfica ocupe más ancho (en PC se mantienen los valores de escritorio).
   const isNarrow = () => (typeof window !== "undefined" && window.innerWidth <= 640);
 
+  // Config para las vistas 3D: scrollZoom permite acercar/alejar con la rueda
+  // en PC y con el gesto de dos dedos (pinch) en celular. La rotación es con
+  // un dedo (turntable). El CSS touch-action:none del lienzo evita que el
+  // navegador se "robe" el pinch para hacer zoom de la página.
+  const CONFIG3D = { responsive: true, displayModeBar: false, scrollZoom: true };
+
   // chart timeframes → (interval, period) for the bars loader
   const TF = {
     "1m":  { interval: "1m",  period: "1d" },
@@ -436,7 +442,7 @@
           aspectratio: isNarrow() ? { x: 1.55, y: 1.0, z: 1.05 } : { x: 2.4, y: 1.0, z: 1.25 },
         },
       });
-      Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
+      Plotly.react(el("spectrum"), traces, layout, CONFIG3D);
       return;
     }
     // 2-D fallback heatmap
@@ -573,7 +579,7 @@
           camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
         },
       });
-      Plotly.react(el("deltaSurf"), [surf], layout, { responsive: true, displayModeBar: false });
+      Plotly.react(el("deltaSurf"), [surf], layout, CONFIG3D);
       return;
     }
     const heat = {
@@ -678,7 +684,7 @@
           camera: { eye: { x: 1.7, y: -1.5, z: 0.8 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
         },
       });
-      Plotly.react(el("volChart"), [surf], layout, { responsive: true, displayModeBar: false });
+      Plotly.react(el("volChart"), [surf], layout, CONFIG3D);
       return;
     }
     const heat = {
