@@ -429,8 +429,11 @@
           yaxis: Object.assign(SCENE_AX("Vencimiento"), { tickfont: { size: 9 },
             tickmode: "array", tickvals: yIdx, ticktext: dte.map((dd) => `${dd}D`) }),
           zaxis: Object.assign(SCENE_AX(`Net ${M} (relativo)`), { showticklabels: false }),
-          camera: { eye: { x: 0.85, y: -1.85, z: 0.6 }, center: { x: 0, y: 0, z: -0.04 } },
-          aspectratio: { x: 2.4, y: 1.0, z: 1.25 },
+          // En móvil: superficie menos ancha y cámara más alejada para que
+          // quepa completa en la pantalla (en PC se mantiene como estaba).
+          camera: { eye: isNarrow() ? { x: 1.05, y: -2.25, z: 0.78 } : { x: 0.85, y: -1.85, z: 0.6 },
+            center: { x: 0, y: 0, z: isNarrow() ? -0.16 : -0.04 } },
+          aspectratio: isNarrow() ? { x: 1.55, y: 1.0, z: 1.05 } : { x: 2.4, y: 1.0, z: 1.25 },
         },
       });
       Plotly.react(el("spectrum"), traces, layout, { responsive: true, displayModeBar: false });
