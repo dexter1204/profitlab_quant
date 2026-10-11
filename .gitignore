@@ -18,3 +18,5 @@ profitlab.db
 # distribution bundle (built for SiteGround upload, not source)
 quantsistem-web.zip
 *.zip
+
+node_modules/

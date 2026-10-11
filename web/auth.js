@@ -59,35 +59,35 @@
     wrap.id = "pl-paywall";
     wrap.style.cssText =
       "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;" +
-      "background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, #05070b 60%);" +
-      "font-family:'Inter',system-ui,sans-serif;color:#e2e8f0;padding:24px";
+      "background:radial-gradient(1200px 700px at 20% -20%, #14161C 0%, #0A0B0E 60%);" +
+      "font-family:'Manrope',system-ui,sans-serif;color:#CBD5E1;padding:24px";
     wrap.innerHTML = `
-      <div style="width:100%;max-width:420px;background:#0b1220;border:1px solid #1f2937;
+      <div style="width:100%;max-width:420px;background:#14161C;border:1px solid #1F222B;
         border-radius:16px;padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
-        <div style="font-size:20px;font-weight:700;color:#f8fafc;letter-spacing:.04em;text-align:center">
-          Profit<span style="color:#22c55e">Lab</span> Quant</div>
+        <div style="font-size:20px;font-weight:800;color:#F1F5F9;letter-spacing:-.01em;text-align:center;font-family:'Bricolage Grotesque','Manrope',sans-serif">
+          Profit<span style="color:#C7F94C">Lab</span> Quant</div>
         <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:16px 0 20px;text-align:center">
-          ${name ? "Hola <b style='color:#e2e8f0'>" + name + "</b>. " : ""}Activa tu acceso al dashboard.</p>
+          ${name ? "Hola <b style='color:#CBD5E1'>" + name + "</b>. " : ""}Activa tu acceso al dashboard.</p>
 
-        <label style="display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:6px">Tengo un cupón</label>
+        <label style="display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#94A3B8;font-weight:700;margin-bottom:6px">Tengo un cupón</label>
         <div style="display:flex;gap:8px">
-          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;background:#070b12;color:#f8fafc;border:1px solid #1f2937;border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
-          <button id="pl-redeem" style="background:#22c55e;color:#04120a;border:0;border-radius:9px;padding:0 16px;font-family:inherit;font-weight:700;cursor:pointer">Canjear</button>
+          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;background:#0A0B0E;color:#F1F5F9;border:1px solid #1F222B;border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
+          <button id="pl-redeem" style="background:#C7F94C;color:#0A0B0E;border:0;border-radius:9px;padding:0 16px;font-family:inherit;font-weight:700;cursor:pointer">Canjear</button>
         </div>
         <div id="pl-msg" style="font-size:13px;margin-top:10px;min-height:16px;color:#f87171"></div>
 
         <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#475569;font-size:11px">
-          <span style="flex:1;height:1px;background:#1f2937"></span>O<span style="flex:1;height:1px;background:#1f2937"></span>
+          <span style="flex:1;height:1px;background:#1F222B"></span>O<span style="flex:1;height:1px;background:#1F222B"></span>
         </div>
 
-        <button id="pl-pay" style="width:100%;background:#0b1220;border:1px solid #22c55e;color:#4ade80;border-radius:9px;padding:13px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
+        <button id="pl-pay" style="width:100%;background:#14161C;border:1px solid rgba(199,249,76,.5);color:#C7F94C;border-radius:9px;padding:13px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
           Comprar acceso — ${priceTxt} · ${daysTxt}</button>
-        <div style="text-align:center;margin-top:16px"><a id="pl-logout" style="color:#64748b;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
+        <div style="text-align:center;margin-top:16px"><a id="pl-logout" style="color:#94A3B8;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
       </div>`;
     document.body.innerHTML = "";
     document.body.appendChild(wrap);
 
-    const msg = (t, ok) => { const m = document.getElementById("pl-msg"); m.textContent = t || ""; m.style.color = ok ? "#4ade80" : "#f87171"; };
+    const msg = (t, ok) => { const m = document.getElementById("pl-msg"); m.textContent = t || ""; m.style.color = ok ? "#C7F94C" : "#f87171"; };
     document.getElementById("pl-logout").addEventListener("click", logout);
     document.getElementById("pl-redeem").addEventListener("click", async () => {
       const code = (document.getElementById("pl-code").value || "").trim().toUpperCase();

@@ -5,25 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>ProfitLab Quant — Gamma &amp; Flow</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <script src="plotly.min.js"></script>
 <style>
   :root{
-    --bg:#05070b; --panel:#0b1220; --border:#1f2937; --grid:#111a2b;
-    --muted:#64748b; --text:#e2e8f0; --text-strong:#f8fafc;
+    /* Gama del Aula ProfitLab */
+    --bg:#0A0B0E; --panel:#14161C; --border:#1F222B; --grid:#1F222B;
+    --muted:#94A3B8; --text:#CBD5E1; --text-strong:#F1F5F9;
+    --lime:#C7F94C; --lime-dim:#A6D63A;         /* acento de marca (chrome) */
     --green:#22c55e; --green-soft:#4ade80; --red:#ef4444; --red-soft:#f87171;
     --amber:#f59e0b; --yellow:#facc15; --purple:#a855f7; --cyan:#06b6d4;
   }
   *{box-sizing:border-box}
   body{
-    margin:0; background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, var(--bg) 60%);
-    color:var(--text); font-family:'Inter',system-ui,sans-serif; letter-spacing:.01em;
+    margin:0; background:radial-gradient(1200px 700px at 20% -20%, #14161C 0%, var(--bg) 60%);
+    color:var(--text); font-family:'Manrope',system-ui,sans-serif; letter-spacing:.01em;
     padding:14px 18px 40px;
   }
   .topbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap;
     border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px}
-  .brand{font-size:18px; font-weight:700; color:var(--text-strong); letter-spacing:.04em}
-  .brand span{color:var(--green)}
+  .brand{font-size:18px; font-weight:800; color:var(--text-strong); letter-spacing:-.01em;
+    font-family:'Bricolage Grotesque','Manrope',sans-serif}
+  .brand span{color:var(--lime)}
   .search{flex:1; min-width:220px; max-width:420px}
   select, input{
     width:100%; background:var(--panel); color:var(--text-strong);
@@ -32,9 +35,10 @@
   }
   .badge{padding:3px 8px; border-radius:4px; font-size:10px; letter-spacing:.16em;
     font-weight:700; text-transform:uppercase; border:1px solid}
-  .badge.live{color:var(--green); border-color:var(--green); background:rgba(34,197,94,.12)}
+  .badge.live{color:var(--lime); border-color:rgba(199,249,76,.5); background:rgba(199,249,76,.12)}
   .title{display:flex; align-items:center; gap:12px; margin:4px 0 10px}
-  .title .tk{font-size:22px; font-weight:700; color:var(--text-strong)}
+  .title .tk{font-size:22px; font-weight:800; color:var(--text-strong); letter-spacing:-.02em;
+    font-family:'Bricolage Grotesque','Manrope',sans-serif}
   .title .sub{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:600}
 
   /* ── tabs ── */
@@ -44,7 +48,7 @@
     font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.04em;
     padding:9px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px}
   .tab:hover{color:var(--text)}
-  .tab.active{color:var(--text-strong); border-bottom-color:var(--green)}
+  .tab.active{color:var(--text-strong); border-bottom-color:var(--lime)}
 
   .spacer{flex:1}
   .acct{color:var(--muted); font-size:11px; letter-spacing:.04em; display:flex; flex-direction:column; align-items:flex-end; line-height:1.3}
@@ -96,7 +100,7 @@
   .seg{display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden}
   .seg button{appearance:none; background:var(--panel); border:0; color:var(--muted);
     font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; cursor:pointer}
-  .seg button.active{background:rgba(34,197,94,.14); color:var(--green-soft)}
+  .seg button.active{background:rgba(199,249,76,.16); color:var(--lime)}
   .hint{color:var(--muted); font-size:11px}
 
   /* ── exposure rank panel (Gamma & Flow right column) ── */
@@ -128,7 +132,7 @@
   .heatwrap{padding:0; overflow:hidden}
   .heat-top{display:flex; justify-content:space-between; align-items:center;
     padding:11px 15px; border-bottom:1px solid var(--border)}
-  .ht-title{color:var(--green); font-size:12px; font-weight:700; letter-spacing:.18em}
+  .ht-title{color:var(--lime); font-size:12px; font-weight:700; letter-spacing:.18em}
   .ht-sub{color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase}
   .heat-scroll{overflow:auto; max-height:74vh}
   table.heat{border-collapse:separate; border-spacing:0; width:100%;
@@ -149,6 +153,66 @@
   tr.spotrow th.sk{color:var(--text-strong)}
 
   .hidden{display:none !important}
+
+  /* ───────── Móvil / App (≤640px): compacto y premium ─────────
+     En PC no cambia nada; solo aplica en pantallas angostas. */
+  @media (max-width:640px){
+    body{ padding:10px 12px 26px; }
+
+    /* Cabecera superior más compacta */
+    .topbar{ gap:8px; padding-bottom:8px; margin-bottom:10px; }
+    .brand{ font-size:15px; letter-spacing:.03em; }
+    .badge.live{ font-size:9px; padding:2px 7px; letter-spacing:.12em; }
+    .acct{ display:none; }                 /* el Aula ya muestra al usuario */
+    .navlink{ padding:7px 10px; font-size:11px; }
+    .search{ order:10; flex:1 1 100%; min-width:0; max-width:none; }  /* selector a su propia fila */
+
+    /* Título del activo */
+    .title{ margin:2px 0 8px; gap:8px; }
+    .title .tk{ font-size:18px; }
+    .title .sub{ font-size:9px; letter-spacing:.1em; }
+
+    /* Pestañas: una sola fila deslizable (swipe), sin amontonarse */
+    .tabs{ flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden;
+      gap:2px; margin:0 -12px 12px; padding:0 12px 1px;
+      scrollbar-width:none; -webkit-overflow-scrolling:touch;
+      scroll-snap-type:x proximity; }
+    .tabs::-webkit-scrollbar{ display:none; }
+    .tab{ flex:0 0 auto; white-space:nowrap; padding:9px 13px; font-size:12.5px;
+      scroll-snap-align:start; }
+
+    /* Métricas: CINTA horizontal deslizable (swipe) en vez de cuadrícula.
+       Así no ocupa 3 filas de alto; se ve una tira y el resto se desliza. */
+    .ribbon{
+      display:flex; flex-wrap:nowrap; align-items:stretch;
+      overflow-x:auto; overflow-y:hidden;
+      gap:8px; background:transparent; border:0; border-radius:0;
+      margin:0 -12px 12px; padding:2px 12px 8px;
+      scrollbar-width:none; -webkit-overflow-scrolling:touch;
+      scroll-snap-type:x proximity;
+    }
+    .ribbon::-webkit-scrollbar{ display:none; }
+    .cell{
+      flex:0 0 auto; min-width:120px;
+      background:var(--panel); border:1px solid var(--border);
+      border-radius:11px; padding:9px 13px; scroll-snap-align:start;
+    }
+    .cell .val{ font-size:18px; }
+
+    /* Gráfica: a TODO el ancho de la pantalla (sangra los bordes del panel)
+       para que respire y se vea más grande. */
+    .layout{ gap:10px; }
+    .panel{ padding:12px; border-radius:10px; }
+    .panel:has(> .plot){
+      margin:0 -12px; padding:10px 2px;
+      border-left:0; border-right:0; border-radius:0;
+    }
+    .plot{ height:62vh; min-height:380px; }
+    .plot.tall{ height:68vh; min-height:420px; }
+
+    .price-big{ font-size:24px; }
+    .regime{ font-size:11px; padding:9px 12px; }
+  }
 </style>
 </head>
 <body>

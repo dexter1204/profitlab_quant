@@ -4,31 +4,33 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>ProfitLab Quant — Acceso</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <style>
-  :root{--bg:#05070b;--panel:#0b1220;--border:#1f2937;--muted:#64748b;--text:#e2e8f0;
-    --text-strong:#f8fafc;--green:#22c55e;--green-soft:#4ade80;--red:#ef4444;--red-soft:#f87171;}
+  :root{--bg:#0A0B0E;--panel:#14161C;--border:#1F222B;--muted:#94A3B8;--text:#CBD5E1;
+    --text-strong:#F1F5F9;--lime:#C7F94C;--lime-dim:#A6D63A;--green:#22c55e;--green-soft:#4ade80;--red:#ef4444;--red-soft:#f87171;}
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(1200px 700px at 20% -20%, #0b1220 0%, var(--bg) 60%);
-    color:var(--text);font-family:'Inter',system-ui,sans-serif;padding:24px}
+    background:radial-gradient(1200px 700px at 20% -20%, #14161C 0%, var(--bg) 60%);
+    color:var(--text);font-family:'Manrope',system-ui,sans-serif;padding:24px}
   .card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--border);
     border-radius:16px;padding:30px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
-  .brand{font-size:22px;font-weight:700;color:var(--text-strong);letter-spacing:.04em;text-align:center}
-  .brand span{color:var(--green)}
+  .brand{font-size:22px;font-weight:800;color:var(--text-strong);letter-spacing:-.01em;text-align:center;font-family:'Bricolage Grotesque','Manrope',sans-serif}
+  .brand span{color:var(--lime)}
   .sub{color:var(--muted);font-size:11px;letter-spacing:.16em;text-transform:uppercase;text-align:center;margin-top:4px;font-weight:600}
   .note{color:var(--muted);font-size:12.5px;line-height:1.5;text-align:center;margin:18px 0 6px}
   label{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:14px 0 5px}
-  input{width:100%;background:#070b12;color:var(--text-strong);border:1px solid var(--border);
+  input{width:100%;background:#0A0B0E;color:var(--text-strong);border:1px solid var(--border);
     border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px}
-  input:focus{outline:none;border-color:var(--green)}
-  button.primary{width:100%;margin-top:20px;background:var(--green);color:#04120a;border:0;border-radius:9px;
+  input:focus{outline:none;border-color:var(--lime)}
+  button.primary{width:100%;margin-top:20px;background:var(--lime);color:#0A0B0E;border:0;border-radius:9px;
     padding:12px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}
-  button.primary:hover{background:var(--green-soft)}
+  button.primary:hover{background:var(--lime-dim)}
   button.primary:disabled{opacity:.6;cursor:default}
   .msg{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:8px;display:none}
   .msg.err{display:block;background:rgba(239,68,68,.1);border:1px solid var(--red);color:var(--red-soft)}
   .hint{color:var(--muted);font-size:12px;text-align:center;margin-top:16px}
-  .hint a{color:var(--green-soft);text-decoration:none}
+  .hint a{color:var(--lime);text-decoration:none}
 </style>
 </head>
 <body>

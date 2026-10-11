@@ -11,12 +11,13 @@
   const DEFAULT_TICKER = "QQQ";
 
   const C = {
-    bg: "#05070b", panel: "#0b1220", grid: "#111a2b", border: "#1f2937",
-    text: "#e2e8f0", muted: "#64748b",
+    // Gama del Aula ProfitLab (mismo diseño que la app)
+    bg: "#0A0B0E", panel: "#14161C", grid: "#1F222B", border: "#1F222B",
+    text: "#CBD5E1", muted: "#94A3B8", lime: "#C7F94C",
     green: "#22c55e", red: "#ef4444", purple: "#a855f7",
     cyan: "#06b6d4", amber: "#f59e0b", yellow: "#facc15",
   };
-  const FONT = { color: C.muted, family: "Inter, sans-serif", size: 11 };
+  const FONT = { color: C.muted, family: "Manrope, sans-serif", size: 11 };
   // dragmode "pan" = drag to move, wheel to zoom (TradingView-style); no
   // rubber-band box zoom. scrollZoom in CONFIG enables the wheel.
   const BASE_LAYOUT = {
@@ -24,6 +25,10 @@
     font: FONT, dragmode: "pan",
   };
   const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true, doubleClick: "reset" };
+
+  // En móvil recortamos los márgenes internos de Plotly para que el área de
+  // la gráfica ocupe más ancho (en PC se mantienen los valores de escritorio).
+  const isNarrow = () => (typeof window !== "undefined" && window.innerWidth <= 640);
 
   // chart timeframes → (interval, period) for the bars loader
   const TF = {
@@ -125,7 +130,7 @@
       hovertemplate: "Strike %{y}<br>DEX %{x:$,.0f}<extra></extra>", xaxis: "x2", yaxis: "y" };
     const { shapes, anns } = levelShapes(d, L);
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 64, r: 70, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
+      margin: isNarrow() ? { l: 44, r: 30, t: 26, b: 34 } : { l: 64, r: 70, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
       showlegend: true, legend: { orientation: "h", x: 0, y: 1.08, font: { color: C.text } },
       shapes, annotations: anns,
       xaxis: { title: { text: "Gamma Exposure ($)", font: { size: 10 } }, zeroline: true,
@@ -434,7 +439,7 @@
     // 2-D fallback heatmap
     const heat = {
       type: "heatmap", z: Zt, x: strikes, y: dte, zmid: 0, zmin: -cScale, zmax: cScale,
-      colorscale: [[0, C.red], [0.5, "#0b1220"], [1, C.green]],
+      colorscale: [[0, C.red], [0.5, "#14161C"], [1, C.green]],
       colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
         thickness: 10, tickformat: "$~s" },
       hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
@@ -544,7 +549,7 @@
     backgroundcolor: "rgba(0,0,0,0)", showbackground: true });
 
   // ── view 6: DELTA SURFACE (3-D surface, 2-D heatmap fallback/toggle) ──────
-  const SURF_SCALE = [[0, C.red], [0.5, "#111a2b"], [1, C.green]];
+  const SURF_SCALE = [[0, C.red], [0.5, "#14161C"], [1, C.green]];
   let _dsurfData = null;
   function renderDeltaSurface(d) {
     _dsurfData = d;
