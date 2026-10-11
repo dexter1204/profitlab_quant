@@ -136,13 +136,14 @@
       hovertemplate: "Strike %{y}<br>DEX %{x:$,.0f}<extra></extra>", xaxis: "x2", yaxis: "y" };
     const { shapes, anns } = levelShapes(d, L);
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: isNarrow() ? { l: 44, r: 30, t: 26, b: 34 } : { l: 64, r: 70, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
-      showlegend: true, legend: { orientation: "h", x: 0, y: 1.08, font: { color: C.text } },
+      margin: isNarrow() ? { l: 44, r: 30, t: 44, b: 34 } : { l: 64, r: 70, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
+      showlegend: true, legend: { orientation: "h", x: 0, y: isNarrow() ? 1.16 : 1.08, font: { color: C.text } },
       shapes, annotations: anns,
       xaxis: { title: { text: "Gamma Exposure ($)", font: { size: 10 } }, zeroline: true,
         zerolinecolor: C.border, gridcolor: C.grid, domain: [0, 1] },
       xaxis2: { overlaying: "x", side: "top", showgrid: false, zeroline: false,
-        title: { text: "Delta Exposure ($)", font: { size: 10, color: C.cyan } },
+        // En móvil quitamos el título del eje DEX (la leyenda ya lo indica) para que no se encime.
+        title: { text: isNarrow() ? "" : "Delta Exposure ($)", font: { size: 10, color: C.cyan } },
         tickfont: { color: C.cyan, size: 9 } },
       yaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, zeroline: false,
         tickfont: { size: 10 }, fixedrange: false },

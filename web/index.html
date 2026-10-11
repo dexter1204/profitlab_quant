@@ -78,13 +78,21 @@
   .tab:hover{color:var(--text)}
   .tab.active{background:rgba(199,249,76,.14); border-color:rgba(199,249,76,.5); color:var(--lime)}
 
-  /* ── Page body ── */
-  .page{padding:var(--s3) 0 40px}
+  /* ── Page body ── (solo vertical: no pisar el gutter horizontal de .wrap) */
+  .page{padding-top:var(--s3); padding-bottom:40px}
 
-  /* Métricas: GRID FIJO por breakpoint (no cinta, sin huecos raros) */
-  .ribbon{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:var(--s3)}
-  @media(min-width:480px){ .ribbon{grid-template-columns:repeat(3,1fr)} }
-  @media(min-width:768px){ .ribbon{grid-template-columns:repeat(4,1fr)} }
+  /* Métricas: en MÓVIL carrusel horizontal (ahorra espacio vertical);
+     en tablet/PC grid fijo (hay espacio de sobra). */
+  .ribbon{display:flex; flex-wrap:nowrap; gap:10px; overflow-x:auto; scrollbar-width:none;
+    margin:0 calc(-1*var(--gutter)) var(--s3); padding:2px var(--gutter) 8px;
+    scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch}
+  .ribbon::-webkit-scrollbar{display:none}
+  .ribbon > .cell{flex:0 0 auto; min-width:150px; scroll-snap-align:start}
+  @media(min-width:768px){
+    .ribbon{display:grid; grid-template-columns:repeat(4,1fr); overflow:visible;
+      margin:0 0 var(--s3); padding:0}
+    .ribbon > .cell{min-width:0}
+  }
   @media(min-width:1100px){ .ribbon{grid-template-columns:repeat(7,1fr)} }
   .cell{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px 13px;
     display:flex; flex-direction:column; gap:4px; min-width:0}
@@ -180,15 +188,34 @@
   #spectrum, #deltaSurf, #volChart,
   #spectrum canvas, #deltaSurf canvas, #volChart canvas{ touch-action:none; }
 
-  /* ── Móvil compacto ──
-     Encabezado: solo logo + LIVE (el Aula ya muestra al usuario). */
+  /* ── Móvil ──
+     Encabezado compacto (el Aula ya muestra al usuario) y gráficas más anchas. */
+  @media(max-width:767px){
+    /* Gráficas a TODO el ancho: sangramos el CONTENEDOR (bloque, no desborda),
+       nunca el item del grid. */
+    .layout{ margin:0 calc(-1*var(--gutter)); }
+    .layout > .panel{ border-radius:0; border-left:0; border-right:0; padding:10px 4px; }
+    .layout > .panel > h3{ padding-left:10px; }
+    .layout > div{ padding:0 var(--gutter); }   /* panel lateral (régimen) mantiene su margen */
+    /* vistas de una sola gráfica (chart/oi/flow/drift/vol/heatmap/espectro) */
+    .view > .panel{ margin:0 calc(-1*var(--gutter)); border-radius:0; border-left:0; border-right:0; }
+    .view > .panel:not(.heatwrap){ padding:10px 4px; }
+  }
   @media(max-width:640px){
     .tagpill{ display:none; }
     .acct{ display:none; }
+    .admin-full{ display:none; }           /* admin: "Gestionar " → solo "alumnos" */
     .iconbtn{ padding:0 11px; font-size:12px; min-height:38px; }
     .appbar .row{ height:52px; }
     .subbar{ top:52px; }
-    .brand{ font-size:16px; }
+    /* El logo puede encogerse (…) para que nunca empuje a los botones */
+    .brand{ font-size:16px; min-width:0; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; }
+  }
+  /* En teléfonos, LIVE queda como punto (sin texto) para liberar espacio
+     cuando el usuario es admin (botón "alumnos" + "Salir"). */
+  @media(max-width:480px){
+    .live{ padding:5px 7px; }
+    .live .txt{ display:none; }
   }
   /* Pantallas muy angostas (p.ej. carátula de plegables ~280px):
      compactamos aún más para que el encabezado nunca desborde. */
@@ -208,7 +235,7 @@
     <span class="grow"></span>
     <span class="live" id="statusBadge"><span class="dot"></span><span class="txt">Live</span></span>
     <span class="acct" id="acctInfo"></span>
-    <a class="iconbtn admin" id="adminLink" href="#" target="_blank" rel="noopener" style="display:none">Gestionar alumnos</a>
+    <a class="iconbtn admin" id="adminLink" href="#" target="_blank" rel="noopener" style="display:none"><span class="admin-full">Gestionar </span>alumnos</a>
     <button class="iconbtn ghost" id="logoutBtn">Salir</button>
   </div></header>
 
