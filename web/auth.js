@@ -63,7 +63,7 @@
       "font-family:'Manrope',system-ui,sans-serif;color:#CBD5E1;padding:24px";
     wrap.innerHTML = `
       <div style="width:100%;max-width:420px;background:#14161C;border:1px solid #1F222B;
-        border-radius:16px;padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
+        border-radius:18px;padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
         <div style="font-size:20px;font-weight:800;color:#F1F5F9;letter-spacing:-.01em;text-align:center;font-family:'Bricolage Grotesque','Manrope',sans-serif">
           Profit<span style="color:#C7F94C">Lab</span> Quant</div>
         <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:16px 0 20px;text-align:center">
@@ -71,8 +71,8 @@
 
         <label style="display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#94A3B8;font-weight:700;margin-bottom:6px">Tengo un cupón</label>
         <div style="display:flex;gap:8px">
-          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;background:#0A0B0E;color:#F1F5F9;border:1px solid #1F222B;border-radius:9px;padding:11px 13px;font-family:inherit;font-size:14px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
-          <button id="pl-redeem" style="background:#C7F94C;color:#0A0B0E;border:0;border-radius:9px;padding:0 16px;font-family:inherit;font-weight:700;cursor:pointer">Canjear</button>
+          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;min-width:0;background:#0A0B0E;color:#F1F5F9;border:1px solid #1F222B;border-radius:11px;padding:13px 14px;min-height:48px;font-family:inherit;font-size:15px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
+          <button id="pl-redeem" style="background:#C7F94C;color:#0A0B0E;border:0;border-radius:11px;padding:0 18px;min-height:48px;font-family:inherit;font-weight:800;cursor:pointer">Canjear</button>
         </div>
         <div id="pl-msg" style="font-size:13px;margin-top:10px;min-height:16px;color:#f87171"></div>
 
@@ -80,7 +80,7 @@
           <span style="flex:1;height:1px;background:#1F222B"></span>O<span style="flex:1;height:1px;background:#1F222B"></span>
         </div>
 
-        <button id="pl-pay" style="width:100%;background:#14161C;border:1px solid rgba(199,249,76,.5);color:#C7F94C;border-radius:9px;padding:13px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
+        <button id="pl-pay" style="width:100%;background:#14161C;border:1px solid rgba(199,249,76,.5);color:#C7F94C;border-radius:12px;padding:14px;min-height:50px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer">
           Comprar acceso — ${priceTxt} · ${daysTxt}</button>
         <div style="text-align:center;margin-top:16px"><a id="pl-logout" style="color:#94A3B8;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
       </div>`;

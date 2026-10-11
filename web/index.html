@@ -10,79 +10,110 @@
 <style>
   :root{
     /* Gama del Aula ProfitLab */
-    --bg:#0A0B0E; --panel:#14161C; --border:#1F222B; --grid:#1F222B;
+    --bg:#0A0B0E; --panel:#14161C; --panel2:#0F1117; --border:#1F222B; --grid:#1F222B;
     --muted:#94A3B8; --text:#CBD5E1; --text-strong:#F1F5F9;
-    --lime:#C7F94C; --lime-dim:#A6D63A;         /* acento de marca (chrome) */
+    --lime:#C7F94C; --lime-dim:#A6D63A;
     --green:#22c55e; --green-soft:#4ade80; --red:#ef4444; --red-soft:#f87171;
     --amber:#f59e0b; --yellow:#facc15; --purple:#a855f7; --cyan:#06b6d4;
+    /* Sistema FIJO: contenedor centrado + gutters por breakpoint */
+    --maxw:1180px; --gutter:16px; --radius:14px;
+    --s1:8px; --s2:12px; --s3:16px; --s4:24px;
   }
+  @media(min-width:768px){ :root{ --gutter:24px; } }
+  @media(min-width:1100px){ :root{ --gutter:32px; } }
   *{box-sizing:border-box}
+  html,body{margin:0}
   body{
-    margin:0; background:radial-gradient(1200px 700px at 20% -20%, #14161C 0%, var(--bg) 60%);
-    color:var(--text); font-family:'Manrope',system-ui,sans-serif; letter-spacing:.01em;
-    padding:14px 18px 40px;
+    background:var(--bg); color:var(--text);
+    font-family:'Manrope',system-ui,sans-serif; letter-spacing:.01em;
+    font-variant-numeric:tabular-nums;
   }
-  .topbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap;
-    border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px}
-  .brand{font-size:18px; font-weight:800; color:var(--text-strong); letter-spacing:-.01em;
-    font-family:'Bricolage Grotesque','Manrope',sans-serif}
+  h1,h2,h3{font-family:'Bricolage Grotesque','Manrope',sans-serif; letter-spacing:-.01em}
+  /* Contenedor FIJO centrado — en tablet/PC margen equilibrado, nunca estirado */
+  .wrap{max-width:var(--maxw); margin:0 auto; padding-left:var(--gutter); padding-right:var(--gutter)}
+
+  /* ── App bar ── */
+  .appbar{position:sticky; top:0; z-index:40; background:rgba(10,11,14,.85);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-bottom:1px solid var(--border)}
+  .appbar .row{display:flex; align-items:center; gap:var(--s2); height:56px}
+  .brand{font-size:17px; font-weight:800; color:var(--text-strong); white-space:nowrap}
   .brand span{color:var(--lime)}
-  .search{flex:1; min-width:220px; max-width:420px}
-  select, input{
-    width:100%; background:var(--panel); color:var(--text-strong);
-    border:1px solid var(--border); border-radius:8px; padding:8px 12px;
-    font-family:inherit; font-size:14px;
-  }
-  .badge{padding:3px 8px; border-radius:4px; font-size:10px; letter-spacing:.16em;
-    font-weight:700; text-transform:uppercase; border:1px solid}
-  .badge.live{color:var(--lime); border-color:rgba(199,249,76,.5); background:rgba(199,249,76,.12)}
-  .title{display:flex; align-items:center; gap:12px; margin:4px 0 10px}
-  .title .tk{font-size:22px; font-weight:800; color:var(--text-strong); letter-spacing:-.02em;
-    font-family:'Bricolage Grotesque','Manrope',sans-serif}
-  .title .sub{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:600}
-
-  /* ── tabs ── */
-  .tabs{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px;
-    border-bottom:1px solid var(--border)}
-  .tab{appearance:none; background:transparent; border:0; color:var(--muted);
-    font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.04em;
-    padding:9px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px}
-  .tab:hover{color:var(--text)}
-  .tab.active{color:var(--text-strong); border-bottom-color:var(--lime)}
-
-  .spacer{flex:1}
-  .acct{color:var(--muted); font-size:11px; letter-spacing:.04em; display:flex; flex-direction:column; align-items:flex-end; line-height:1.3}
-  .acct b{color:var(--text-strong); font-weight:600}
-  .acct .exp{font-size:10px; letter-spacing:.1em; text-transform:uppercase}
+  .tagpill{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+    border:1px solid var(--border); border-radius:999px; padding:3px 9px; font-weight:700; white-space:nowrap}
+  .grow{flex:1}
+  .live{display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--lime);
+    border:1px solid rgba(199,249,76,.35); background:rgba(199,249,76,.1);
+    border-radius:999px; padding:4px 10px; white-space:nowrap}
+  .live .dot{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px var(--lime)}
+  .iconbtn{display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 13px;
+    border-radius:10px; border:1px solid var(--border); background:var(--panel); color:var(--text);
+    font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; text-decoration:none; white-space:nowrap}
+  .iconbtn:hover{border-color:var(--muted)}
+  .iconbtn.admin{border-color:rgba(245,158,11,.4); color:var(--amber)}
+  .iconbtn.ghost{background:transparent}
+  .acct{display:flex; flex-direction:column; align-items:flex-end; line-height:1.25}
+  .acct b{color:var(--text-strong); font-size:13px; font-weight:700}
+  .acct .exp{font-size:10px; letter-spacing:.08em; text-transform:uppercase}
   .acct .exp.ok{color:var(--green-soft)} .acct .exp.life{color:var(--cyan)}
-  .navlink{appearance:none; background:transparent; border:1px solid var(--border); color:var(--text);
-    border-radius:8px; padding:7px 11px; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none}
-  .navlink:hover{border-color:var(--muted)}
-  .navlink.admin{border-color:rgba(245,158,11,.4); color:var(--amber)}
 
-  .ribbon{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-    gap:1px; background:var(--border); border:1px solid var(--border);
-    border-radius:10px; overflow:hidden; margin-bottom:14px}
-  .cell{background:var(--panel); padding:10px 14px; display:flex; flex-direction:column; gap:4px}
-  .cell .lbl{color:var(--muted); font-size:10px; letter-spacing:.16em; font-weight:700; text-transform:uppercase}
-  .cell .val{color:var(--text-strong); font-size:20px; font-weight:600; line-height:1.05; font-variant-numeric:tabular-nums}
-  .cell .sub{font-size:11px; font-weight:500; letter-spacing:.02em}
+  /* ── Sub-bar: ticker + tabs ── */
+  .subbar{position:sticky; top:56px; z-index:30; background:var(--bg); border-bottom:1px solid var(--border)}
+  .tickrow{display:flex; align-items:center; gap:var(--s2); padding:var(--s2) 0}
+  .selector{position:relative; flex:1; min-width:0; max-width:360px}
+  .selector select{width:100%; appearance:none; -webkit-appearance:none; background:var(--panel); color:var(--text-strong);
+    border:1px solid var(--border); border-radius:10px; padding:11px 36px 11px 13px;
+    font-family:inherit; font-size:14px; font-weight:600; cursor:pointer}
+  .selector .chev{position:absolute; right:12px; top:50%; transform:translateY(-50%); pointer-events:none; color:var(--muted); font-size:12px}
+  .assetname{font-size:13px; color:var(--muted); white-space:nowrap}
+  .assetname b{color:var(--text-strong); font-family:'Bricolage Grotesque','Manrope',sans-serif; font-size:16px; font-weight:800}
+
+  .tabs{display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding-bottom:10px;
+    scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto; scroll-snap-align:start; appearance:none; cursor:pointer;
+    background:var(--panel); border:1px solid var(--border); color:var(--muted);
+    font-family:inherit; font-size:13px; font-weight:600; padding:9px 14px; border-radius:999px;
+    min-height:40px; white-space:nowrap}
+  .tab:hover{color:var(--text)}
+  .tab.active{background:rgba(199,249,76,.14); border-color:rgba(199,249,76,.5); color:var(--lime)}
+
+  /* ── Page body ── */
+  .page{padding:var(--s3) 0 40px}
+
+  /* Métricas: GRID FIJO por breakpoint (no cinta, sin huecos raros) */
+  .ribbon{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:var(--s3)}
+  @media(min-width:480px){ .ribbon{grid-template-columns:repeat(3,1fr)} }
+  @media(min-width:768px){ .ribbon{grid-template-columns:repeat(4,1fr)} }
+  @media(min-width:1100px){ .ribbon{grid-template-columns:repeat(7,1fr)} }
+  .cell{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px 13px;
+    display:flex; flex-direction:column; gap:4px; min-width:0}
+  .cell .lbl{color:var(--muted); font-size:10px; letter-spacing:.12em; text-transform:uppercase; font-weight:700}
+  .cell .val{color:var(--text-strong); font-size:clamp(17px,4.6vw,21px); font-weight:700; line-height:1.05;
+    font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
+  .cell .sub{font-size:11px; font-weight:600}
   .cell.call .val{color:var(--green)} .cell.put .val{color:var(--red)}
-  .cell.gamma .val{color:var(--purple)} .cell.delta .val{color:var(--cyan)}
-  .cell.pain .val{color:var(--amber)}
+  .cell.gamma .val{color:var(--purple)} .cell.delta .val{color:var(--cyan)} .cell.pain .val{color:var(--amber)}
   .pos{color:var(--green)} .neg{color:var(--red)}
 
-  .layout{display:grid; grid-template-columns:3fr 1fr; gap:14px}
-  @media(max-width:900px){ .layout{grid-template-columns:1fr} }
-  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px}
-  .panel h3{color:var(--muted); font-size:11px; letter-spacing:.16em; text-transform:uppercase; margin:0 0 8px; font-weight:700}
-  .plot{width:100%; height:640px}
-  .plot.tall{height:720px}
-  /* Vistas 3D: el lienzo recibe el gesto de dos dedos (pinch = zoom) y de un
-     dedo (rotar). touch-action:none evita que el navegador/webview use el
-     pinch para hacer zoom de la página en vez de la gráfica. */
-  #spectrum, #deltaSurf, #volChart,
-  #spectrum canvas, #deltaSurf canvas, #volChart canvas{ touch-action:none; }
+  /* Layout gráfica + panel — stack <1024, lado a lado ≥1024 */
+  .layout{display:grid; grid-template-columns:1fr; gap:var(--s3)}
+  @media(min-width:1024px){ .layout{grid-template-columns:minmax(0,2.4fr) minmax(290px,1fr)} }
+
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:var(--s3); min-width:0}
+  .panel h3{color:var(--muted); font-size:11px; letter-spacing:.14em; text-transform:uppercase; margin:0 0 var(--s2); font-weight:700}
+  /* Altura de gráfica CONTROLADA (clamp) — nunca gigante ni minúscula */
+  .plot{width:100%; height:clamp(320px,46vh,460px)}
+  .plot.tall{height:clamp(380px,60vh,600px)}
+
+  /* Toolbar de controles por vista */
+  .toolbar{display:flex; gap:var(--s2); align-items:center; margin-bottom:var(--s3); flex-wrap:wrap}
+  .seg{display:inline-flex; background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .seg button{appearance:none; background:transparent; border:0; color:var(--muted); min-height:40px;
+    font-family:inherit; font-size:13px; font-weight:600; padding:0 14px; cursor:pointer}
+  .seg button.active{background:rgba(199,249,76,.16); color:var(--lime)}
+  .hint{color:var(--muted); font-size:12px; flex:1; min-width:180px}
+
   .regime{display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 16px;
     border-radius:8px; font-weight:700; letter-spacing:.12em; font-size:12px; margin:10px 0 6px}
   .regime.long{background:rgba(34,197,94,.12); border:1px solid var(--green); color:var(--green-soft); box-shadow:0 0 16px rgba(34,197,94,.22)}
@@ -100,19 +131,10 @@
   optgroup{color:var(--muted); font-weight:700}
   option{color:var(--text-strong)}
 
-  /* ── toolbar (per-view controls) ── */
-  .toolbar{display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap}
-  .seg{display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden}
-  .seg button{appearance:none; background:var(--panel); border:0; color:var(--muted);
-    font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; cursor:pointer}
-  .seg button.active{background:rgba(199,249,76,.16); color:var(--lime)}
-  .hint{color:var(--muted); font-size:11px}
-
   /* ── exposure rank panel (Gamma & Flow right column) ── */
   #regimePanel{display:flex; flex-direction:column; gap:12px}
   .rp-seg{align-self:flex-start}
-  .rp-tiles{display:grid; grid-template-columns:1fr 1fr; gap:1px;
-    background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .rp-tiles{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden}
   .rp-tile{background:var(--panel); padding:9px 11px; display:flex; flex-direction:column; gap:2px}
   .rp-tile.wide{grid-column:1 / -1}
   .rp-tile .t{color:var(--muted); font-size:9px; letter-spacing:.14em; font-weight:700; text-transform:uppercase}
@@ -130,133 +152,95 @@
   .rp-fill.pos{background:var(--green)} .rp-fill.neg{background:var(--red)}
   .rp-amt{font-size:11px; text-align:right; font-weight:600; font-variant-numeric:tabular-nums}
   .rp-amt.pos{color:var(--green)} .rp-amt.neg{color:var(--red)}
-  .rp-foot{color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
-    border-top:1px solid var(--border); padding-top:8px}
+  .rp-foot{color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase; border-top:1px solid var(--border); padding-top:8px}
 
   /* ── GEX/DEX heatmap table (strike × DTE) ── */
   .heatwrap{padding:0; overflow:hidden}
-  .heat-top{display:flex; justify-content:space-between; align-items:center;
+  .heat-top{display:flex; justify-content:space-between; align-items:center; gap:10px;
     padding:11px 15px; border-bottom:1px solid var(--border)}
   .ht-title{color:var(--lime); font-size:12px; font-weight:700; letter-spacing:.18em}
   .ht-sub{color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase}
   .heat-scroll{overflow:auto; max-height:74vh}
-  table.heat{border-collapse:separate; border-spacing:0; width:100%;
-    font-variant-numeric:tabular-nums}
-  table.heat th.hc{position:sticky; top:0; z-index:3; background:#070b12;
-    color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.12em;
-    padding:8px 12px; text-align:center; border-bottom:1px solid var(--border)}
+  table.heat{border-collapse:separate; border-spacing:0; width:100%; font-variant-numeric:tabular-nums}
+  table.heat th.hc{position:sticky; top:0; z-index:3; background:#070b12; color:var(--muted); font-size:10px;
+    font-weight:700; letter-spacing:.12em; padding:8px 12px; text-align:center; border-bottom:1px solid var(--border)}
   table.heat th.hc.c0{color:var(--amber)}
-  table.heat th.sk{position:sticky; left:0; z-index:2; background:#070b12;
-    text-align:right; color:var(--text); font-size:11px; font-weight:600;
-    padding:5px 12px; border-right:1px solid var(--border); white-space:nowrap}
+  table.heat th.sk{position:sticky; left:0; z-index:2; background:#070b12; text-align:right; color:var(--text);
+    font-size:11px; font-weight:600; padding:5px 12px; border-right:1px solid var(--border); white-space:nowrap}
   table.heat th.hc.sk{z-index:4; color:var(--muted)}
-  table.heat th.sk i{font-style:normal; font-size:8px; letter-spacing:.14em;
-    color:var(--cyan); margin-left:6px}
-  table.heat td{padding:5px 12px; text-align:center; font-size:11px; color:#eef3fb;
-    font-weight:600; border-bottom:1px solid rgba(8,12,20,.9); white-space:nowrap}
+  table.heat th.sk i{font-style:normal; font-size:8px; letter-spacing:.14em; color:var(--cyan); margin-left:6px}
+  table.heat td{padding:5px 12px; text-align:center; font-size:11px; color:#eef3fb; font-weight:600;
+    border-bottom:1px solid rgba(8,12,20,.9); white-space:nowrap}
   tr.spotrow th.sk, tr.spotrow td{box-shadow:inset 0 1px 0 var(--cyan), inset 0 -1px 0 var(--cyan)}
   tr.spotrow th.sk{color:var(--text-strong)}
 
   .hidden{display:none !important}
 
-  /* ───────── Móvil / App (≤640px): compacto y premium ─────────
-     En PC no cambia nada; solo aplica en pantallas angostas. */
-  @media (max-width:640px){
-    body{ padding:10px 12px 26px; }
+  /* Vistas 3D: el lienzo recibe pinch (zoom) y un dedo (rotar) */
+  #spectrum, #deltaSurf, #volChart,
+  #spectrum canvas, #deltaSurf canvas, #volChart canvas{ touch-action:none; }
 
-    /* Cabecera superior más compacta */
-    .topbar{ gap:8px; padding-bottom:8px; margin-bottom:10px; }
-    .brand{ font-size:15px; letter-spacing:.03em; }
-    .badge.live{ font-size:9px; padding:2px 7px; letter-spacing:.12em; }
-    .acct{ display:none; }                 /* el Aula ya muestra al usuario */
-    .navlink{ padding:7px 10px; font-size:11px; }
-    .search{ order:10; flex:1 1 100%; min-width:0; max-width:none; }  /* selector a su propia fila */
-
-    /* Título del activo */
-    .title{ margin:2px 0 8px; gap:8px; }
-    .title .tk{ font-size:18px; }
-    .title .sub{ font-size:9px; letter-spacing:.1em; }
-
-    /* Pestañas: una sola fila deslizable (swipe), sin amontonarse */
-    .tabs{ flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden;
-      gap:2px; margin:0 -12px 12px; padding:0 12px 1px;
-      scrollbar-width:none; -webkit-overflow-scrolling:touch;
-      scroll-snap-type:x proximity; }
-    .tabs::-webkit-scrollbar{ display:none; }
-    .tab{ flex:0 0 auto; white-space:nowrap; padding:9px 13px; font-size:12.5px;
-      scroll-snap-align:start; }
-
-    /* Métricas: CINTA horizontal deslizable (swipe) en vez de cuadrícula.
-       Así no ocupa 3 filas de alto; se ve una tira y el resto se desliza. */
-    .ribbon{
-      display:flex; flex-wrap:nowrap; align-items:stretch;
-      overflow-x:auto; overflow-y:hidden;
-      gap:8px; background:transparent; border:0; border-radius:0;
-      margin:0 -12px 12px; padding:2px 12px 8px;
-      scrollbar-width:none; -webkit-overflow-scrolling:touch;
-      scroll-snap-type:x proximity;
-    }
-    .ribbon::-webkit-scrollbar{ display:none; }
-    .cell{
-      flex:0 0 auto; min-width:120px;
-      background:var(--panel); border:1px solid var(--border);
-      border-radius:11px; padding:9px 13px; scroll-snap-align:start;
-    }
-    .cell .val{ font-size:18px; }
-
-    /* Gráfica: a TODO el ancho de la pantalla (sangra los bordes del panel)
-       para que respire y se vea más grande. */
-    .layout{ gap:10px; }
-    .panel{ padding:12px; border-radius:10px; }
-    .panel:has(> .plot){
-      margin:0 -12px; padding:10px 2px;
-      border-left:0; border-right:0; border-radius:0;
-    }
-    .plot{ height:62vh; min-height:380px; }
-    .plot.tall{ height:68vh; min-height:420px; }
-
-    .price-big{ font-size:24px; }
-    .regime{ font-size:11px; padding:9px 12px; }
+  /* ── Móvil compacto ──
+     Encabezado: solo logo + LIVE (el Aula ya muestra al usuario). */
+  @media(max-width:640px){
+    .tagpill{ display:none; }
+    .acct{ display:none; }
+    .iconbtn{ padding:0 11px; font-size:12px; min-height:38px; }
+    .appbar .row{ height:52px; }
+    .subbar{ top:52px; }
+    .brand{ font-size:16px; }
+  }
+  /* Pantallas muy angostas (p.ej. carátula de plegables ~280px):
+     compactamos aún más para que el encabezado nunca desborde. */
+  @media(max-width:360px){
+    .appbar .row{ gap:8px; }
+    .brand{ font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis }
+    .live{ padding:4px 7px; }
+    .live .txt{ display:none; }          /* queda solo el punto LIVE */
+    .iconbtn{ padding:0 9px; font-size:11px; min-height:36px; }
   }
 </style>
 </head>
 <body>
-  <div class="topbar">
+  <header class="appbar"><div class="wrap row">
     <div class="brand">Profit<span>Lab</span> Quant</div>
-    <div class="search">
-      <select id="ticker" aria-label="ticker"></select>
-    </div>
-    <span class="badge live" id="statusBadge">● LIVE</span>
-    <span class="spacer"></span>
+    <span class="tagpill">Aula</span>
+    <span class="grow"></span>
+    <span class="live" id="statusBadge"><span class="dot"></span><span class="txt">Live</span></span>
     <span class="acct" id="acctInfo"></span>
-    <a class="navlink admin" id="adminLink" href="#" target="_blank" rel="noopener" style="display:none">Gestionar alumnos</a>
-    <button class="navlink" id="logoutBtn">Salir</button>
-  </div>
+    <a class="iconbtn admin" id="adminLink" href="#" target="_blank" rel="noopener" style="display:none">Gestionar alumnos</a>
+    <button class="iconbtn ghost" id="logoutBtn">Salir</button>
+  </div></header>
 
-  <div class="title">
-    <span class="tk" id="tkName">QQQ</span>
-    <span class="sub">Gamma &amp; Beta Exposure</span>
-  </div>
+  <div class="subbar"><div class="wrap">
+    <div class="tickrow">
+      <div class="selector">
+        <select id="ticker" aria-label="ticker"></select>
+        <span class="chev">▾</span>
+      </div>
+      <span class="assetname"><b id="tkName">QQQ</b></span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
+      <button class="tab" data-view="chart">Chart</button>
+      <button class="tab" data-view="gexheat">GEX Heatmap</button>
+      <button class="tab" data-view="spectrum">Espectro 3D</button>
+      <button class="tab" data-view="oi">OI / % OI</button>
+      <button class="tab" data-view="flow">Big Trades</button>
+      <button class="tab" data-view="dsurf">Delta Surface</button>
+      <button class="tab" data-view="drift">Net Drift</button>
+      <button class="tab" data-view="vol">Volatility</button>
+    </nav>
+  </div></div>
 
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
-    <button class="tab" data-view="chart">Chart</button>
-    <button class="tab" data-view="gexheat">GEX Heatmap</button>
-    <button class="tab" data-view="spectrum">Espectro 3D</button>
-    <button class="tab" data-view="oi">OI / % OI</button>
-    <button class="tab" data-view="flow">Big Trades</button>
-    <button class="tab" data-view="dsurf">Delta Surface</button>
-    <button class="tab" data-view="drift">Net Drift</button>
-    <button class="tab" data-view="vol">Volatility</button>
-  </div>
-
+  <main class="wrap page">
   <div id="err"></div>
 
   <!-- ── GAMMA & FLOW ── -->
   <section id="view-gamma" class="view">
     <div class="ribbon" id="ribbon"></div>
     <div class="layout">
-      <div class="panel"><div id="gammaChart" class="plot"><div class="loading">Cargando…</div></div></div>
+      <div class="panel"><h3>Gamma &amp; Delta Exposure</h3><div id="gammaChart" class="plot"><div class="loading">Cargando…</div></div></div>
       <div><div class="panel" id="regimePanel"></div></div>
     </div>
   </section>
@@ -271,7 +255,7 @@
         <button data-tf="1h">1h</button>
         <button data-tf="1D">1D</button>
       </div>
-      <span class="hint">scroll = zoom · arrastra = mover · doble-clic = reset</span>
+      <span class="hint">scroll/pinch = zoom · arrastra = mover · doble-clic = reset</span>
     </div>
     <div class="panel"><div id="priceChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
@@ -299,11 +283,11 @@
         <button data-s3d="3d" class="active">3D</button>
         <button data-s3d="2d">2D</button>
       </div>
-      <span class="hint">Superficie espectral Net (C−P) sobre strike × vencimiento · verde = positivo, rojo = negativo · arrastra para rotar</span>
+      <span class="hint">Superficie espectral Net (C−P) sobre strike × vencimiento · verde = positivo, rojo = negativo · pinch = zoom, un dedo = rotar</span>
     </div>
     <div class="panel heatwrap">
       <div class="heat-top"><span class="ht-title" id="spectrumTitle">VISTA ESPECTRO</span><span class="ht-sub" id="spectrumSub">Net (C−P)</span></div>
-      <div id="spectrum" class="plot tall" style="height:660px"><div class="loading" style="padding:16px">Cargando…</div></div>
+      <div id="spectrum" class="plot tall"><div class="loading" style="padding:16px">Cargando…</div></div>
     </div>
   </section>
 
@@ -337,7 +321,7 @@
         <button data-s3d="3d" class="active">3D</button>
         <button data-s3d="2d">2D</button>
       </div>
-      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · arrastra para rotar</span>
+      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · pinch = zoom, un dedo = rotar</span>
     </div>
     <div class="panel"><div id="deltaSurf" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
@@ -365,6 +349,7 @@
     </div>
     <div class="panel"><div id="volChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
+  </main>
 
   <script src="config.js"></script>
   <script src="auth.js"></script>
