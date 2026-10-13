@@ -26,9 +26,10 @@
   };
   const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true, doubleClick: "reset" };
 
-  // En móvil recortamos los márgenes internos de Plotly para que el área de
-  // la gráfica ocupe más ancho (en PC se mantienen los valores de escritorio).
-  const isNarrow = () => (typeof window !== "undefined" && window.innerWidth <= 640);
+  // Versión APP vs WEB: la maqueta la decide cada HTML (index.html = 'web',
+  // app.html = 'app') fijando window.PLQ_MODE. Los gráficos usan ESE modo
+  // (márgenes, aspecto, cámara 3D) en vez de adivinar por el ancho de pantalla.
+  const isNarrow = () => (typeof window !== "undefined" && window.PLQ_MODE === "app");
 
   // Config para las vistas 3D: scrollZoom permite acercar/alejar con la rueda
   // en PC y con el gesto de dos dedos (pinch) en celular. La rotación es con

@@ -3,124 +3,111 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>ProfitLab Quant — Gamma &amp; Flow</title>
+<title>ProfitLab Quant — Escritorio</title>
+<script>
+  // Versión WEB (escritorio). Si el Aula embebe esta página (token por #plq=),
+  // redirige a la versión APP, optimizada para móvil/táctil.
+  if (/[#&]plq=/.test(location.hash)) { location.replace('app.html' + location.search + location.hash); }
+  window.PLQ_MODE = 'web';
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <script src="plotly.min.js"></script>
 <style>
   :root{
-    /* Gama del Aula ProfitLab */
     --bg:#0A0B0E; --panel:#14161C; --panel2:#0F1117; --border:#1F222B; --grid:#1F222B;
     --muted:#94A3B8; --text:#CBD5E1; --text-strong:#F1F5F9;
     --lime:#C7F94C; --lime-dim:#A6D63A;
     --green:#22c55e; --green-soft:#4ade80; --red:#ef4444; --red-soft:#f87171;
     --amber:#f59e0b; --yellow:#facc15; --purple:#a855f7; --cyan:#06b6d4;
-    /* Sistema FIJO: contenedor centrado + gutters por breakpoint */
-    --maxw:1180px; --gutter:16px; --radius:14px;
+    /* ESCRITORIO: contenedor ancho, aprovecha la pantalla grande. */
+    --maxw:1480px; --gutter:40px; --radius:14px;
     --s1:8px; --s2:12px; --s3:16px; --s4:24px;
   }
-  @media(min-width:768px){ :root{ --gutter:24px; } }
-  @media(min-width:1100px){ :root{ --gutter:32px; } }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
-    background:var(--bg); color:var(--text);
-    font-family:'Manrope',system-ui,sans-serif; letter-spacing:.01em;
-    font-variant-numeric:tabular-nums;
+    background:radial-gradient(1400px 800px at 15% -10%, #14161C 0%, var(--bg) 55%);
+    color:var(--text); font-family:'Manrope',system-ui,sans-serif; letter-spacing:.01em;
+    font-variant-numeric:tabular-nums; min-height:100vh;
   }
   h1,h2,h3{font-family:'Bricolage Grotesque','Manrope',sans-serif; letter-spacing:-.01em}
-  /* Contenedor FIJO centrado — en tablet/PC margen equilibrado, nunca estirado */
   .wrap{max-width:var(--maxw); margin:0 auto; padding-left:var(--gutter); padding-right:var(--gutter)}
 
   /* ── App bar ── */
-  .appbar{position:sticky; top:0; z-index:40; background:rgba(10,11,14,.85);
-    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border-bottom:1px solid var(--border)}
-  .appbar .row{display:flex; align-items:center; gap:var(--s2); height:56px}
-  .brand{font-size:17px; font-weight:800; color:var(--text-strong); white-space:nowrap}
+  .appbar{position:sticky; top:0; z-index:40; background:rgba(10,11,14,.8);
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--border)}
+  .appbar .row{display:flex; align-items:center; gap:16px; height:66px}
+  .brand{font-size:20px; font-weight:800; color:var(--text-strong); white-space:nowrap}
   .brand span{color:var(--lime)}
   .tagpill{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
-    border:1px solid var(--border); border-radius:999px; padding:3px 9px; font-weight:700; white-space:nowrap}
+    border:1px solid var(--border); border-radius:999px; padding:4px 10px; font-weight:700; white-space:nowrap}
   .grow{flex:1}
-  .live{display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700;
+  .live{display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:700;
     letter-spacing:.14em; text-transform:uppercase; color:var(--lime);
     border:1px solid rgba(199,249,76,.35); background:rgba(199,249,76,.1);
-    border-radius:999px; padding:4px 10px; white-space:nowrap}
+    border-radius:999px; padding:5px 12px; white-space:nowrap}
   .live .dot{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px var(--lime)}
-  .iconbtn{display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 13px;
+  .iconbtn{display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:0 15px;
     border-radius:10px; border:1px solid var(--border); background:var(--panel); color:var(--text);
     font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; text-decoration:none; white-space:nowrap}
   .iconbtn:hover{border-color:var(--muted)}
   .iconbtn.admin{border-color:rgba(245,158,11,.4); color:var(--amber)}
   .iconbtn.ghost{background:transparent}
   .acct{display:flex; flex-direction:column; align-items:flex-end; line-height:1.25}
-  .acct b{color:var(--text-strong); font-size:13px; font-weight:700}
+  .acct b{color:var(--text-strong); font-size:14px; font-weight:700}
   .acct .exp{font-size:10px; letter-spacing:.08em; text-transform:uppercase}
   .acct .exp.ok{color:var(--green-soft)} .acct .exp.life{color:var(--cyan)}
 
-  /* ── Sub-bar: ticker + tabs ── */
-  .subbar{position:sticky; top:56px; z-index:30; background:var(--bg); border-bottom:1px solid var(--border)}
-  .tickrow{display:flex; align-items:center; gap:var(--s2); padding:var(--s2) 0}
-  .selector{position:relative; flex:1; min-width:0; max-width:360px}
+  /* ── Sub-bar: ticker + pestañas (todas visibles, una fila que ajusta) ── */
+  .subbar{position:sticky; top:66px; z-index:30; background:rgba(10,11,14,.82);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--border)}
+  .subbar .wrap{display:flex; align-items:center; gap:24px; padding:14px 0; flex-wrap:wrap}
+  .tickrow{display:flex; align-items:center; gap:14px}
+  .selector{position:relative; width:320px}
   .selector select{width:100%; appearance:none; -webkit-appearance:none; background:var(--panel); color:var(--text-strong);
-    border:1px solid var(--border); border-radius:10px; padding:11px 36px 11px 13px;
+    border:1px solid var(--border); border-radius:10px; padding:11px 36px 11px 14px;
     font-family:inherit; font-size:14px; font-weight:600; cursor:pointer}
   .selector .chev{position:absolute; right:12px; top:50%; transform:translateY(-50%); pointer-events:none; color:var(--muted); font-size:12px}
-  .assetname{font-size:13px; color:var(--muted); white-space:nowrap}
-  .assetname b{color:var(--text-strong); font-family:'Bricolage Grotesque','Manrope',sans-serif; font-size:16px; font-weight:800}
+  .assetname{font-size:14px; color:var(--muted); white-space:nowrap}
+  .assetname b{color:var(--text-strong); font-family:'Bricolage Grotesque','Manrope',sans-serif; font-size:18px; font-weight:800}
 
-  .tabs{display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; padding-bottom:10px;
-    scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch}
-  .tabs::-webkit-scrollbar{display:none}
-  .tab{flex:0 0 auto; scroll-snap-align:start; appearance:none; cursor:pointer;
-    background:var(--panel); border:1px solid var(--border); color:var(--muted);
-    font-family:inherit; font-size:13px; font-weight:600; padding:9px 14px; border-radius:999px;
-    min-height:40px; white-space:nowrap}
-  .tab:hover{color:var(--text)}
+  .tabs{display:flex; gap:7px; flex-wrap:wrap; flex:1; justify-content:flex-end}
+  .tab{appearance:none; cursor:pointer; background:var(--panel); border:1px solid var(--border); color:var(--muted);
+    font-family:inherit; font-size:13px; font-weight:600; padding:9px 15px; border-radius:999px; white-space:nowrap}
+  .tab:hover{color:var(--text); border-color:var(--muted)}
   .tab.active{background:rgba(199,249,76,.14); border-color:rgba(199,249,76,.5); color:var(--lime)}
 
-  /* ── Page body ── (solo vertical: no pisar el gutter horizontal de .wrap) */
-  .page{padding-top:var(--s3); padding-bottom:40px}
+  .page{padding-top:var(--s4); padding-bottom:48px}
 
-  /* Métricas: en MÓVIL carrusel horizontal (ahorra espacio vertical);
-     en tablet/PC grid fijo (hay espacio de sobra). */
-  .ribbon{display:flex; flex-wrap:nowrap; gap:10px; overflow-x:auto; scrollbar-width:none;
-    margin:0 calc(-1*var(--gutter)) var(--s3); padding:2px var(--gutter) 8px;
-    scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch}
-  .ribbon::-webkit-scrollbar{display:none}
-  .ribbon > .cell{flex:0 0 auto; min-width:150px; scroll-snap-align:start}
-  @media(min-width:768px){
-    .ribbon{display:grid; grid-template-columns:repeat(4,1fr); overflow:visible;
-      margin:0 0 var(--s3); padding:0}
-    .ribbon > .cell{min-width:0}
-  }
-  @media(min-width:1100px){ .ribbon{grid-template-columns:repeat(7,1fr)} }
-  .cell{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px 13px;
-    display:flex; flex-direction:column; gap:4px; min-width:0}
-  .cell .lbl{color:var(--muted); font-size:10px; letter-spacing:.12em; text-transform:uppercase; font-weight:700}
-  .cell .val{color:var(--text-strong); font-size:clamp(17px,4.6vw,21px); font-weight:700; line-height:1.05;
-    font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
-  .cell .sub{font-size:11px; font-weight:600}
+  /* Métricas: fila de tarjetas (ajusta el nº de columnas al ancho) */
+  .ribbon{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:var(--s4)}
+  .cell{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px;
+    display:flex; flex-direction:column; gap:5px; min-width:0}
+  .cell .lbl{color:var(--muted); font-size:11px; letter-spacing:.12em; text-transform:uppercase; font-weight:700}
+  .cell .val{color:var(--text-strong); font-size:24px; font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
+  .cell .sub{font-size:12px; font-weight:600}
   .cell.call .val{color:var(--green)} .cell.put .val{color:var(--red)}
   .cell.gamma .val{color:var(--purple)} .cell.delta .val{color:var(--cyan)} .cell.pain .val{color:var(--amber)}
   .pos{color:var(--green)} .neg{color:var(--red)}
 
-  /* Layout gráfica + panel — stack <1024, lado a lado ≥1024 */
-  .layout{display:grid; grid-template-columns:1fr; gap:var(--s3)}
-  @media(min-width:1024px){ .layout{grid-template-columns:minmax(0,2.4fr) minmax(290px,1fr)} }
+  /* Gráfica + panel lado a lado (grande) */
+  .layout{display:grid; grid-template-columns:minmax(0,2.6fr) minmax(320px,1fr); gap:var(--s4)}
+  @media(max-width:1023px){ .layout{grid-template-columns:1fr} }
 
-  .panel{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:var(--s3); min-width:0}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px; min-width:0}
   .panel h3{color:var(--muted); font-size:11px; letter-spacing:.14em; text-transform:uppercase; margin:0 0 var(--s2); font-weight:700}
-  /* Altura de gráfica CONTROLADA (clamp) — nunca gigante ni minúscula */
-  .plot{width:100%; height:clamp(320px,46vh,460px)}
-  .plot.tall{height:clamp(380px,60vh,600px)}
+  /* Gráficas grandes en escritorio */
+  .plot{width:100%; height:min(60vh,600px); min-height:420px}
+  .plot.tall{height:min(72vh,760px); min-height:500px}
 
-  /* Toolbar de controles por vista */
   .toolbar{display:flex; gap:var(--s2); align-items:center; margin-bottom:var(--s3); flex-wrap:wrap}
   .seg{display:inline-flex; background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden}
   .seg button{appearance:none; background:transparent; border:0; color:var(--muted); min-height:40px;
-    font-family:inherit; font-size:13px; font-weight:600; padding:0 14px; cursor:pointer}
+    font-family:inherit; font-size:13px; font-weight:600; padding:0 16px; cursor:pointer}
+  .seg button:hover{color:var(--text)}
   .seg button.active{background:rgba(199,249,76,.16); color:var(--lime)}
-  .hint{color:var(--muted); font-size:12px; flex:1; min-width:180px}
+  .hint{color:var(--muted); font-size:12px; flex:1; min-width:200px}
 
   .regime{display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 16px;
     border-radius:8px; font-weight:700; letter-spacing:.12em; font-size:12px; margin:10px 0 6px}
@@ -128,9 +115,9 @@
   .regime.short{background:rgba(239,68,68,.12); border:1px solid var(--red); color:var(--red-soft); box-shadow:0 0 16px rgba(239,68,68,.22)}
   .regime.trans{background:rgba(250,204,21,.10); border:1px solid var(--yellow); color:var(--yellow)}
   .regime .dot{width:8px; height:8px; border-radius:50%; background:currentColor; box-shadow:0 0 10px currentColor}
-  .price-big{font-size:30px; font-weight:600; color:var(--text-strong); font-variant-numeric:tabular-nums}
+  .price-big{font-size:32px; font-weight:600; color:var(--text-strong); font-variant-numeric:tabular-nums}
   .reading{color:var(--muted); font-size:12px; margin-top:6px; text-align:center}
-  .statrow{display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:11px; letter-spacing:.08em}
+  .statrow{display:flex; justify-content:space-between; padding:7px 0; border-top:1px solid var(--border); font-size:12px; letter-spacing:.08em}
   .statrow .k{color:var(--muted); text-transform:uppercase; font-weight:700}
   .statrow .v{color:var(--text-strong); font-weight:600; font-variant-numeric:tabular-nums}
   .error{background:rgba(239,68,68,.1); border:1px solid var(--red); color:var(--red-soft);
@@ -139,99 +126,56 @@
   optgroup{color:var(--muted); font-weight:700}
   option{color:var(--text-strong)}
 
-  /* ── exposure rank panel (Gamma & Flow right column) ── */
+  /* exposure rank panel */
   #regimePanel{display:flex; flex-direction:column; gap:12px}
   .rp-seg{align-self:flex-start}
   .rp-tiles{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden}
-  .rp-tile{background:var(--panel); padding:9px 11px; display:flex; flex-direction:column; gap:2px}
+  .rp-tile{background:var(--panel); padding:11px 13px; display:flex; flex-direction:column; gap:2px}
   .rp-tile.wide{grid-column:1 / -1}
   .rp-tile .t{color:var(--muted); font-size:9px; letter-spacing:.14em; font-weight:700; text-transform:uppercase}
-  .rp-tile .vv{color:var(--text-strong); font-size:16px; font-weight:600; line-height:1.1; font-variant-numeric:tabular-nums}
+  .rp-tile .vv{color:var(--text-strong); font-size:18px; font-weight:600; line-height:1.1; font-variant-numeric:tabular-nums}
   .rp-tile .vv.pos{color:var(--green)} .rp-tile .vv.neg{color:var(--red)}
   .rp-tile .ss{font-size:10px; color:var(--muted)}
-  .rp-split{display:flex; height:24px; border-radius:6px; overflow:hidden; font-size:10px; font-weight:700; letter-spacing:.04em}
+  .rp-split{display:flex; height:26px; border-radius:6px; overflow:hidden; font-size:10px; font-weight:700; letter-spacing:.04em}
   .rp-split .put{background:rgba(239,68,68,.9); color:#fff; display:flex; align-items:center; padding:0 9px; white-space:nowrap}
   .rp-split .call{background:rgba(34,197,94,.9); color:#05241a; display:flex; align-items:center; justify-content:flex-end; padding:0 9px; flex:1; white-space:nowrap}
-  .rp-rank{display:flex; flex-direction:column; gap:5px}
-  .rp-row{display:grid; grid-template-columns:52px 1fr 80px; align-items:center; gap:8px}
-  .rp-k{font-size:11px; color:var(--text); font-weight:600; font-variant-numeric:tabular-nums}
-  .rp-track{height:14px; background:rgba(148,163,184,.08); border-radius:3px; overflow:hidden}
-  .rp-fill{display:block; height:100%; border-radius:3px}
+  .rp-rank{display:flex; flex-direction:column; gap:6px}
+  .rp-row{display:grid; grid-template-columns:56px 1fr 84px; align-items:center; gap:9px}
+  .rp-k{font-size:12px; color:var(--text); font-weight:600; font-variant-numeric:tabular-nums}
+  .rp-track{height:15px; background:rgba(148,163,184,.08); border-radius:4px; overflow:hidden}
+  .rp-fill{display:block; height:100%; border-radius:4px}
   .rp-fill.pos{background:var(--green)} .rp-fill.neg{background:var(--red)}
   .rp-amt{font-size:11px; text-align:right; font-weight:600; font-variant-numeric:tabular-nums}
   .rp-amt.pos{color:var(--green)} .rp-amt.neg{color:var(--red)}
   .rp-foot{color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase; border-top:1px solid var(--border); padding-top:8px}
 
-  /* ── GEX/DEX heatmap table (strike × DTE) ── */
+  /* heatmap */
   .heatwrap{padding:0; overflow:hidden}
-  .heat-top{display:flex; justify-content:space-between; align-items:center; gap:10px;
-    padding:11px 15px; border-bottom:1px solid var(--border)}
+  .heat-top{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:13px 18px; border-bottom:1px solid var(--border)}
   .ht-title{color:var(--lime); font-size:12px; font-weight:700; letter-spacing:.18em}
   .ht-sub{color:var(--muted); font-size:10px; letter-spacing:.18em; text-transform:uppercase}
-  .heat-scroll{overflow:auto; max-height:74vh}
+  .heat-scroll{overflow:auto; max-height:72vh}
   table.heat{border-collapse:separate; border-spacing:0; width:100%; font-variant-numeric:tabular-nums}
-  table.heat th.hc{position:sticky; top:0; z-index:3; background:#070b12; color:var(--muted); font-size:10px;
-    font-weight:700; letter-spacing:.12em; padding:8px 12px; text-align:center; border-bottom:1px solid var(--border)}
+  table.heat th.hc{position:sticky; top:0; z-index:3; background:#070b12; color:var(--muted); font-size:11px;
+    font-weight:700; letter-spacing:.12em; padding:9px 14px; text-align:center; border-bottom:1px solid var(--border)}
   table.heat th.hc.c0{color:var(--amber)}
   table.heat th.sk{position:sticky; left:0; z-index:2; background:#070b12; text-align:right; color:var(--text);
-    font-size:11px; font-weight:600; padding:5px 12px; border-right:1px solid var(--border); white-space:nowrap}
+    font-size:12px; font-weight:600; padding:6px 14px; border-right:1px solid var(--border); white-space:nowrap}
   table.heat th.hc.sk{z-index:4; color:var(--muted)}
   table.heat th.sk i{font-style:normal; font-size:8px; letter-spacing:.14em; color:var(--cyan); margin-left:6px}
-  table.heat td{padding:5px 12px; text-align:center; font-size:11px; color:#eef3fb; font-weight:600;
+  table.heat td{padding:6px 14px; text-align:center; font-size:12px; color:#eef3fb; font-weight:600;
     border-bottom:1px solid rgba(8,12,20,.9); white-space:nowrap}
   tr.spotrow th.sk, tr.spotrow td{box-shadow:inset 0 1px 0 var(--cyan), inset 0 -1px 0 var(--cyan)}
   tr.spotrow th.sk{color:var(--text-strong)}
 
   .hidden{display:none !important}
-
-  /* Vistas 3D: el lienzo recibe pinch (zoom) y un dedo (rotar) */
-  #spectrum, #deltaSurf, #volChart,
-  #spectrum canvas, #deltaSurf canvas, #volChart canvas{ touch-action:none; }
-
-  /* ── Móvil ──
-     Encabezado compacto (el Aula ya muestra al usuario) y gráficas más anchas. */
-  @media(max-width:767px){
-    /* Gráficas a TODO el ancho: sangramos el CONTENEDOR (bloque, no desborda),
-       nunca el item del grid. */
-    .layout{ margin:0 calc(-1*var(--gutter)); }
-    .layout > .panel{ border-radius:0; border-left:0; border-right:0; padding:10px 4px; }
-    .layout > .panel > h3{ padding-left:10px; }
-    .layout > div{ padding:0 var(--gutter); }   /* panel lateral (régimen) mantiene su margen */
-    /* vistas de una sola gráfica (chart/oi/flow/drift/vol/heatmap/espectro) */
-    .view > .panel{ margin:0 calc(-1*var(--gutter)); border-radius:0; border-left:0; border-right:0; }
-    .view > .panel:not(.heatwrap){ padding:10px 4px; }
-  }
-  @media(max-width:640px){
-    .tagpill{ display:none; }
-    .acct{ display:none; }
-    .admin-full{ display:none; }           /* admin: "Gestionar " → solo "alumnos" */
-    .iconbtn{ padding:0 11px; font-size:12px; min-height:38px; }
-    .appbar .row{ height:52px; }
-    .subbar{ top:52px; }
-    /* El logo puede encogerse (…) para que nunca empuje a los botones */
-    .brand{ font-size:16px; min-width:0; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; }
-  }
-  /* En teléfonos, LIVE queda como punto (sin texto) para liberar espacio
-     cuando el usuario es admin (botón "alumnos" + "Salir"). */
-  @media(max-width:480px){
-    .live{ padding:5px 7px; }
-    .live .txt{ display:none; }
-  }
-  /* Pantallas muy angostas (p.ej. carátula de plegables ~280px):
-     compactamos aún más para que el encabezado nunca desborde. */
-  @media(max-width:360px){
-    .appbar .row{ gap:8px; }
-    .brand{ font-size:14px; min-width:0; overflow:hidden; text-overflow:ellipsis }
-    .live{ padding:4px 7px; }
-    .live .txt{ display:none; }          /* queda solo el punto LIVE */
-    .iconbtn{ padding:0 9px; font-size:11px; min-height:36px; }
-  }
+  #spectrum, #deltaSurf, #volChart{ touch-action:none; }
 </style>
 </head>
 <body>
   <header class="appbar"><div class="wrap row">
     <div class="brand">Profit<span>Lab</span> Quant</div>
-    <span class="tagpill">Aula</span>
+    <span class="tagpill">Escritorio</span>
     <span class="grow"></span>
     <span class="live" id="statusBadge"><span class="dot"></span><span class="txt">Live</span></span>
     <span class="acct" id="acctInfo"></span>
@@ -282,7 +226,7 @@
         <button data-tf="1h">1h</button>
         <button data-tf="1D">1D</button>
       </div>
-      <span class="hint">scroll/pinch = zoom · arrastra = mover · doble-clic = reset</span>
+      <span class="hint">scroll = zoom · arrastra = mover · doble-clic = reset</span>
     </div>
     <div class="panel"><div id="priceChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
@@ -299,7 +243,7 @@
     <div class="panel heatwrap"><div id="gexHeat" class="heattable"><div class="loading" style="padding:16px">Cargando…</div></div></div>
   </section>
 
-  <!-- ── ESPECTRO 3D (GEX/DEX surface) ── -->
+  <!-- ── ESPECTRO 3D ── -->
   <section id="view-spectrum" class="view hidden">
     <div class="toolbar">
       <div class="seg" id="spectrumMode">
@@ -310,7 +254,7 @@
         <button data-s3d="3d" class="active">3D</button>
         <button data-s3d="2d">2D</button>
       </div>
-      <span class="hint">Superficie espectral Net (C−P) sobre strike × vencimiento · verde = positivo, rojo = negativo · pinch = zoom, un dedo = rotar</span>
+      <span class="hint">Superficie espectral Net (C−P) sobre strike × vencimiento · verde = positivo, rojo = negativo · arrastra para rotar · scroll = zoom</span>
     </div>
     <div class="panel heatwrap">
       <div class="heat-top"><span class="ht-title" id="spectrumTitle">VISTA ESPECTRO</span><span class="ht-sub" id="spectrumSub">Net (C−P)</span></div>
@@ -330,7 +274,7 @@
     <div class="panel"><div id="oiChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
-  <!-- ── BIG TRADES (flujo grande por nivel) ── -->
+  <!-- ── BIG TRADES ── -->
   <section id="view-flow" class="view hidden">
     <div class="ribbon" id="flowRibbon"></div>
     <div class="toolbar"><span class="hint">$ nocional negociado hoy por nivel (volumen × precio × 100) · Vol/OI &gt; 1 = posicionamiento nuevo agresivo</span></div>
@@ -348,7 +292,7 @@
         <button data-s3d="3d" class="active">3D</button>
         <button data-s3d="2d">2D</button>
       </div>
-      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · pinch = zoom, un dedo = rotar</span>
+      <span class="hint">Delta Black-Scholes sobre spot × tiempo a vencimiento (strike ATM) · arrastra para rotar</span>
     </div>
     <div class="panel"><div id="deltaSurf" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
@@ -361,7 +305,7 @@
     <div class="panel"><div id="netDrift" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
-  <!-- ── VOLATILITY (drift term-structure + surface) ── -->
+  <!-- ── VOLATILITY ── -->
   <section id="view-vol" class="view hidden">
     <div class="toolbar">
       <div class="seg" id="volMode">
