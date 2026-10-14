@@ -626,20 +626,24 @@
       name: `${d.ticker || ""} (${fmtPrice(T.last)})`, line: { color: WHITE, width: 1.4 },
       hovertemplate: `%{x}<br>${d.ticker || ""} $%{y:,.2f}<extra></extra>`,
     };
+    // Dos paneles apilados que COMPARTEN el eje de tiempo (sin doble eje):
+    //  · arriba  (y)  = Premium drift ($) con Call/Put drift
+    //  · abajo   (y2) = Precio del subyacente
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 66, r: 60, t: 90, b: 42 }, hovermode: "x unified",
+      margin: { l: 66, r: 20, t: 92, b: 44 }, hovermode: "x unified",
       annotations: [{ xref: "paper", yref: "paper", x: 0.5, xanchor: "center",
-        y: 1.15, yanchor: "bottom", showarrow: false,
+        y: 1.17, yanchor: "bottom", showarrow: false,
         text: `Net Drift (Premium) · ${d.ticker || ""}`, font: { size: 12, color: C.text } }],
       showlegend: true,
-      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.02, font: { color: C.text, size: 11 } },
-      xaxis: { type: "category", tickmode: "auto", nticks: 14, gridcolor: C.grid,
-        tickfont: { size: 9 }, showgrid: true },
-      yaxis: { title: { text: "Premium drift ($)", font: { size: 10 } }, gridcolor: C.grid,
-        zeroline: true, zerolinecolor: C.border, tickfont: { size: 9 }, tickformat: "$~s" },
-      yaxis2: { overlaying: "y", side: "right", showgrid: false, zeroline: false,
-        title: { text: "Precio", font: { size: 10, color: WHITE } },
-        tickfont: { size: 9, color: "#cbd5e1" }, tickprefix: "$" },
+      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.04, font: { color: C.text, size: 11 } },
+      xaxis: { type: "category", tickmode: "auto", nticks: 12, gridcolor: C.grid,
+        tickfont: { size: 9 }, showgrid: true, anchor: "y2", domain: [0, 1] },
+      yaxis: { domain: [0.56, 1], title: { text: "Premium drift ($)", font: { size: 10 } },
+        gridcolor: C.grid, zeroline: true, zerolinecolor: C.border, tickfont: { size: 9 },
+        tickformat: "$~s", anchor: "x" },
+      yaxis2: { domain: [0, 0.46], title: { text: `Precio ${d.ticker || ""}`, font: { size: 10, color: WHITE } },
+        gridcolor: C.grid, zeroline: false, tickfont: { size: 9, color: "#cbd5e1" },
+        tickprefix: "$", anchor: "x" },
     });
     Plotly.react(el("netDrift"), [callT, putT, priceT], layout, CONFIG);
   }
