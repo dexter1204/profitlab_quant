@@ -16,6 +16,25 @@
   const goLogin = () => { location.href = "login.html"; };
   function logout() { clearToken(); goLogin(); }
 
+  // ── SSO desde el Aula / super-app ────────────────────────────────────────
+  // Cuando el Aula embebe este dashboard en un iframe, pasa el JWT del alumno
+  // por la URL: app.html#plq=<token> (o ?plq=<token>). Lo adoptamos como sesión
+  // del quant y limpiamos la URL para no dejar el token a la vista. Sin esto el
+  // iframe caía siempre en login.html aunque el alumno ya tuviera sesión y cupón.
+  (function adoptSSOToken() {
+    try {
+      const src = (location.hash || "") + "&" + (location.search || "");
+      const m = src.match(/[#&?]plq=([^&]+)/);
+      if (m && m[1]) {
+        setToken(decodeURIComponent(m[1]));
+        // Quitar plq= de hash y query, conservando lo demás de la URL.
+        const hash = (location.hash || "").replace(/([#&])plq=[^&]*/, "$1").replace(/[#&]$/, "");
+        const search = (location.search || "").replace(/([?&])plq=[^&]*/, "$1").replace(/[?&]$/, "");
+        history.replaceState(null, "", location.pathname + search + hash);
+      }
+    } catch (_) {}
+  })();
+
   // Sign in with Aula credentials (email + password) via the Aula API.
   async function login(email, password) {
     const res = await fetch(`${API_BASE}/auth/login`, {
