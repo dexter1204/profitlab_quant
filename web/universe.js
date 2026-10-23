@@ -57,14 +57,35 @@
     return !!pick && pick.trim().toUpperCase() in FUTURES_MAP;
   }
 
-  // Populate a <select> with three labeled optgroups.
-  function populate(selectEl, selected) {
+  // Populate the asset picker. Supports BOTH:
+  //  · <input list="…"> + <datalist>  → the curated list are SUGGESTIONS, and
+  //    the user can also type ANY symbol their plan supports (free entry).
+  //  · <select> (legacy) → three labeled optgroups.
+  function populate(elm, selected) {
     const groups = [
       ["OPTIONS · stocks & ETFs", OPTIONS],
       ["FUTURES → index gamma", FUTURES],
       ["INDICES", INDICES],
     ];
-    selectEl.innerHTML = "";
+
+    if (elm.tagName === "INPUT") {
+      const list = document.getElementById(elm.getAttribute("list"));
+      if (list) {
+        list.innerHTML = "";
+        for (const [label, syms] of groups) {
+          for (const s of syms) {
+            const o = document.createElement("option");
+            o.value = s;
+            o.label = isFutures(s) ? `${s} → ${FUTURES_MAP[s]} · ${label}` : `${s} · ${label}`;
+            list.appendChild(o);
+          }
+        }
+      }
+      if (selected) elm.value = selected;
+      return;
+    }
+
+    elm.innerHTML = "";
     for (const [label, syms] of groups) {
       const og = document.createElement("optgroup");
       og.label = label;
@@ -75,7 +96,7 @@
         if (s === selected) o.selected = true;
         og.appendChild(o);
       }
-      selectEl.appendChild(og);
+      elm.appendChild(og);
     }
   }
 

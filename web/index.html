@@ -32,6 +32,8 @@
   .subbar .row { display: flex; align-items: center; gap: 22px; padding: 12px 0; flex-wrap: wrap; }
   .tickrow { display: flex; align-items: center; gap: 14px; }
   .selector { width: 300px; }
+  .selector input { padding-right: 34px; font-weight: 600; text-transform: uppercase; }
+  .selector input::placeholder { text-transform: none; font-weight: 400; }
   .assetname { font-size: 14px; color: var(--text-2); white-space: nowrap; }
   .assetname b { color: var(--text); font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
   .tabs { flex: 1; justify-content: flex-end; }
@@ -177,7 +179,9 @@
   <div class="subbar material"><div class="wrap row">
     <div class="tickrow">
       <div class="selector">
-        <select id="ticker" aria-label="ticker"></select>
+        <input id="ticker" list="tickerList" autocomplete="off" spellcheck="false"
+               aria-label="Buscar activo" placeholder="Busca o escribe un símbolo…" />
+        <datalist id="tickerList"></datalist>
         <span class="chev">▾</span>
       </div>
       <span class="assetname"><b id="tkName">QQQ</b></span>

@@ -915,7 +915,11 @@
   function init() {
     const sel = el("ticker");
     U.populate(sel, DEFAULT_TICKER);
-    sel.addEventListener("change", () => onTickerChange(sel.value));
+    // Picking from the datalist OR typing any symbol the plan supports both
+    // fire "change" (on commit/Enter/blur). Enter also commits explicitly.
+    const commitTicker = () => { const v = (sel.value || "").trim().toUpperCase(); if (v && v !== state.pick) onTickerChange(v); };
+    sel.addEventListener("change", commitTicker);
+    sel.addEventListener("keydown", (e) => { if (e.key === "Enter") { sel.blur(); commitTicker(); } });
 
     for (const t of document.querySelectorAll(".tab"))
       t.addEventListener("click", () => switchTo(t.dataset.view));
