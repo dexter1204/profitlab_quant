@@ -545,6 +545,23 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
     return None
 
 
+def _session_bars(ticker: str, start_min: int = 8 * 60, end_min: int = 15 * 60):
+    """Latest trading session's intraday bars, restricted to the regular
+    window (default 08:00–15:00). Both the Net Drift and Volatility Drift views
+    are intraday, so this keeps them to one clean session (no overnight /
+    extended-hours tail, no multi-day zig-zag)."""
+    bars = _intraday_bars_fallback(ticker)
+    if bars is None or not len(bars):
+        return None
+    bars = bars.dropna(subset=["close"]).copy()
+    ts = pd.to_datetime(bars["ts"])
+    bars = bars[ts.dt.normalize() == ts.dt.normalize().max()]   # latest day only
+    ts = pd.to_datetime(bars["ts"])
+    mins = ts.dt.hour * 60 + ts.dt.minute
+    bars = bars[(mins >= start_min) & (mins <= end_min)]
+    return bars.sort_values("ts").reset_index(drop=True)
+
+
 @app.get("/api/net_drift/{ticker}", dependencies=GATED)
 def net_drift(ticker: str):
     """Intraday cumulative premium drift. Two series accrue across the
@@ -571,10 +588,9 @@ def net_drift(ticker: str):
         call_tot = float(notional[is_call].sum())
         put_tot = float(notional[~is_call].sum())
 
-        bars = _intraday_bars_fallback(ticker)
+        bars = _session_bars(ticker)   # latest session, 08:00–15:00 only
         if bars is None or not len(bars):
             raise RuntimeError("Sin barras intradía para este símbolo/plan.")
-        bars = bars.dropna(subset=["close"]).reset_index(drop=True)
         close = bars["close"].to_numpy(dtype=float)
         volb = pd.to_numeric(bars.get("volume", 1.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
         n = len(close)
@@ -609,10 +625,53 @@ def net_drift(ticker: str):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/volatility_drift/{ticker}", dependencies=GATED)
+def volatility_drift(ticker: str, window: int = Query(20, ge=5, le=60)):
+    """Volatility Drift (INTRADAY, 08:00–15:00 session): realized vol (ARV =
+    annualized rolling realized volatility from minute returns), the current
+    ATM implied-vol level, and the underlying price on one time axis. Shows
+    whether the stock is actually moving more/less than options price in."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        bars = _session_bars(ticker)   # latest session, 08:00–15:00
+        if bars is None or len(bars) < window + 2:
+            raise RuntimeError("Sin barras intradía suficientes para la volatilidad.")
+        close = bars["close"].to_numpy(dtype=float)
+        s = pd.Series(close)
+        logret = np.log(s / s.shift(1))
+        # annualize minute-bar vol: 252 trading days × 390 regular-session mins
+        ann = np.sqrt(252 * 390)
+        arv = (logret.rolling(window).std(ddof=1) * ann * 100.0).to_numpy()
+
+        iv_atm = None
+        try:
+            chain = pdata.option_chain(ticker)
+            spot = pdata.spot(ticker)
+            iv_atm = _atm_iv(chain, spot) * 100.0
+        except Exception:
+            iv_atm = None
+
+        t = [pd.Timestamp(x).strftime("%H:%M") for x in bars["ts"]]
+        return {
+            "ticker": ticker,
+            "window": window,
+            "t": t,
+            "price": [_clean(v) for v in close],
+            "arv": [_clean(v) for v in arv],
+            "iv": _clean(iv_atm),
+        }
+
+    try:
+        return _cached(f"voldrift_ts:{ticker}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/vol_drift/{ticker}", dependencies=GATED)
 def vol_drift(ticker: str):
     """ATM / call / put implied-vol term structure by expiry (DTE) plus the
-    put-call skew — the Volatility Drift view."""
+    put-call skew — the Volatility (term structure) view."""
     ticker = ticker.upper().strip()
 
     def _compute():

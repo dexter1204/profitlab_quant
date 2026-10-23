@@ -21,6 +21,11 @@
     sceneBg: "rgba(0,0,0,0)", sceneGrid: "rgba(255,255,255,.14)",
   };
   const FONT = { color: C.muted, family: "-apple-system, 'Inter', system-ui, sans-serif", size: 11 };
+  // Hover tooltip — theme-aware so it's never white-on-white in dark mode.
+  // Same mutable-object trick as FONT: BASE_LAYOUT holds the reference and
+  // syncPalette() updates its fields, so a theme toggle recolors the tooltip.
+  const HOVER = { bgcolor: C.panel, bordercolor: C.border,
+    font: { color: C.text, family: "-apple-system, 'Inter', system-ui, sans-serif", size: 12 } };
   function syncPalette() {
     const p = window.PLQ_THEME; if (!p) return;
     C.bg = p.panel; C.panel = p.panel; C.grid = p.grid; C.border = p.border; C.zero = p.zero;
@@ -30,13 +35,15 @@
     C.sceneBg = p.scene_bg; C.sceneGrid = p.scene_grid;
     C.tagBg = (window.PLQTheme && window.PLQTheme.get() === "light") ? "rgba(255,255,255,.82)" : "rgba(10,10,12,.72)";
     FONT.color = p.muted;
+    // opaque tooltip bg so text always reads (panel is a solid surface color)
+    HOVER.bgcolor = p.panel; HOVER.bordercolor = p.border; HOVER.font.color = p.text;
   }
   syncPalette();
   // dragmode "pan" = drag to move, wheel to zoom (TradingView-style); no
   // rubber-band box zoom. scrollZoom in CONFIG enables the wheel.
   const BASE_LAYOUT = {
     paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
-    font: FONT, dragmode: "pan",
+    font: FONT, dragmode: "pan", hoverlabel: HOVER,
   };
   const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true, doubleClick: "reset" };
 
@@ -213,27 +220,16 @@
     ];
     const rib = el("ribbon"); rib.className = "tape"; rib.innerHTML = tapeHTML(cells);
 
-    const strikesG = d.strikes || [];
     const gexV = d.gex || [];
     const gexColors = gexV.map((v) => (v >= 0 ? C.green : C.red));
-    // relief sizing: bar thickness + a drop-shadow sliver below each bar
-    const stepG = strikesG.length > 1 ? Math.abs(strikesG[1] - strikesG[0]) : 1;
-    const barW = stepG * 0.66;
     const maxAbs = gexV.reduce((m, v) => Math.max(m, Math.abs(Number(v) || 0)), 0) || 1;
     // $ labels only on the meaningful bars so the chart doesn't get noisy
     const gexText = gexV.map((v) => (Math.abs(v) >= 0.16 * maxAbs ? fmtBig(v) : ""));
-    const isLight = window.PLQTheme && window.PLQTheme.get() === "light";
 
-    // shadow trace (drawn first → behind): a dark translucent copy shifted down
-    // a sliver so each bar appears lifted off the surface (fake 3-D depth).
-    const gexShadow = { type: "bar", orientation: "h", x: gexV, y: strikesG.map((s) => s - stepG * 0.16),
-      width: barW, marker: { color: isLight ? "rgba(0,0,0,.16)" : "rgba(0,0,0,.42)", line: { width: 0 } },
-      hoverinfo: "skip", showlegend: false, xaxis: "x", yaxis: "y", cliponaxis: false };
-
-    const gexBars = { type: "bar", orientation: "h", x: gexV, y: strikesG, width: barW,
-      marker: { color: gexColors, cornerradius: 5,
-        line: { color: isLight ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)", width: 1 } },
-      name: "GEX", text: gexText, textposition: "outside", cliponaxis: false,
+    // thin, flat bars (original look) + the $ labels at the bar ends
+    const gexBars = { type: "bar", orientation: "h", x: gexV, y: d.strikes || [],
+      marker: { color: gexColors, line: { width: 0 } }, name: "GEX",
+      text: gexText, textposition: "outside", cliponaxis: false,
       textfont: { size: 9.5, color: gexColors, family: FONT.family },
       hovertemplate: "Strike %{y}<br>GEX %{x:$,.0f}<extra></extra>", xaxis: "x", yaxis: "y" };
     const dexLine = { type: "scatter", mode: "lines+markers", x: d.dex || [], y: d.dex_strikes || [],
@@ -253,7 +249,7 @@
       yaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, zeroline: false,
         tickfont: { size: 10 }, fixedrange: false },
     });
-    Plotly.react(el("gammaChart"), [gexShadow, gexBars, dexLine], layout, CONFIG);
+    Plotly.react(el("gammaChart"), [gexBars, dexLine], layout, CONFIG);
     renderRegime(d);
   }
   // Right-column exposure panel — ranks the live chain by absolute GEX (or
@@ -715,40 +711,104 @@
     const callT = {
       type: "scatter", mode: "lines", x: t, y: d.call_drift || [], yaxis: "y",
       name: `Call Drift (${fmtBig(T.call_drift)})`, line: { color: C.red, width: 1.6 },
-      fill: "tozeroy", fillcolor: "rgba(239,68,68,.16)",
+      fill: "tozeroy", fillcolor: "rgba(239,68,68,.26)",
       hovertemplate: "%{x}<br>Call drift %{y:$,.3s}<extra></extra>",
     };
     const putT = {
       type: "scatter", mode: "lines", x: t, y: d.put_drift || [], yaxis: "y",
       name: `Put Drift (${fmtBig(T.put_drift)})`, line: { color: BLUE, width: 1.6 },
-      fill: "tozeroy", fillcolor: "rgba(59,130,246,.16)",
+      fill: "tozeroy", fillcolor: "rgba(59,130,246,.26)",
       hovertemplate: "%{x}<br>Put drift %{y:$,.3s}<extra></extra>",
     };
     const priceT = {
       type: "scatter", mode: "lines", x: t, y: d.price || [], yaxis: "y2",
-      name: `${d.ticker || ""} (${fmtPrice(T.last)})`, line: { color: WHITE, width: 1.4 },
+      name: `${d.ticker || ""} (${fmtPrice(T.last)})`, line: { color: WHITE, width: 1.5 },
       hovertemplate: `%{x}<br>${d.ticker || ""} $%{y:,.2f}<extra></extra>`,
     };
-    // Dos paneles apilados que COMPARTEN el eje de tiempo (sin doble eje):
-    //  · arriba  (y)  = Premium drift ($) con Call/Put drift
-    //  · abajo   (y2) = Precio del subyacente
+    // UN SOLO gráfico combinado con doble eje Y, usando AMBOS cuadrantes:
+    //  · izquierda (y)  = Premium drift ($): Call arriba de 0, Put debajo de 0.
+    //  · derecha  (y2)  = Precio: ANCLADO para que la APERTURA del día quede en
+    //    la línea $0. Así, cuando el precio sube se dibuja en el cuadrante
+    //    POSITIVO (arriba) y cuando baja, en el NEGATIVO (abajo).
+    const fin = (a) => (a || []).filter((v) => v != null && isFinite(v));
+    const pv = fin(d.call_drift).concat(fin(d.put_drift));
+    const pr = fin(d.price);
+    let yRange, y2Range;
+    if (pv.length && pr.length) {
+      let pMax = Math.max(0, ...pv), pMin = Math.min(0, ...pv);
+      const pPad = (pMax - pMin) * 0.08 || 1; pMax += pPad; pMin -= pPad;
+      const zf = (0 - pMin) / (pMax - pMin);                 // altura (0..1) del cero
+      const base = pr[0];                                    // apertura del día
+      let prMin = Math.min(...pr), prMax = Math.max(...pr);
+      const prPad = (prMax - prMin) * 0.12 || 0.5; prMin -= prPad; prMax += prPad;
+      // escala de precio para que `base` caiga en la fracción `zf` y quepan todos
+      const H = Math.max((base - prMin) / Math.max(zf, 1e-3),
+                         (prMax - base) / Math.max(1 - zf, 1e-3));
+      yRange = [pMin, pMax];
+      y2Range = [base - zf * H, base + (1 - zf) * H];
+    }
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 66, r: 20, t: 92, b: 44 }, hovermode: "x unified",
+      margin: { l: 66, r: 66, t: 72, b: 44 }, hovermode: "x unified",
       annotations: [{ xref: "paper", yref: "paper", x: 0.5, xanchor: "center",
-        y: 1.17, yanchor: "bottom", showarrow: false,
+        y: 1.16, yanchor: "bottom", showarrow: false,
         text: `Net Drift (Premium) · ${d.ticker || ""}`, font: { size: 12, color: C.text } }],
       showlegend: true,
-      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.04, font: { color: C.text, size: 11 } },
+      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.03, font: { color: C.text, size: 11 } },
       xaxis: { type: "category", tickmode: "auto", nticks: 12, gridcolor: C.grid,
-        tickfont: { size: 9 }, showgrid: true, anchor: "y2", domain: [0, 1] },
-      yaxis: { domain: [0.56, 1], title: { text: "Premium drift ($)", font: { size: 10 } },
-        gridcolor: C.grid, zeroline: true, zerolinecolor: C.border, tickfont: { size: 9 },
-        tickformat: "$~s", anchor: "x" },
-      yaxis2: { domain: [0, 0.46], title: { text: `Precio ${d.ticker || ""}`, font: { size: 10, color: WHITE } },
-        gridcolor: C.grid, zeroline: false, tickfont: { size: 9, color: C.text },
-        tickprefix: "$", anchor: "x" },
+        tickfont: { size: 9 }, showgrid: true },
+      yaxis: { title: { text: "Premium drift ($)", font: { size: 10 } },
+        gridcolor: C.grid, zeroline: true, zerolinecolor: C.muted, zerolinewidth: 1.2,
+        tickfont: { size: 9 }, tickformat: "$~s", range: yRange },
+      yaxis2: { title: { text: `Precio ${d.ticker || ""}`, font: { size: 10, color: WHITE } },
+        overlaying: "y", side: "right", zeroline: false, showgrid: false,
+        tickfont: { size: 9, color: C.text }, tickprefix: "$", range: y2Range },
     });
     Plotly.react(el("netDrift"), [callT, putT, priceT], layout, CONFIG);
+  }
+
+  // ── view 7b: VOLATILITY DRIFT (IV vs ARV + price) ─────────────────────────
+  function renderVolatilityDrift(d) {
+    const x = d.t || [], arv = d.arv || [], price = d.price || [];
+    const ivv = (d.iv == null || !isFinite(d.iv)) ? null : d.iv;
+    const lastArv = arv.length ? arv[arv.length - 1] : null;
+    const lastPx = price.length ? price[price.length - 1] : null;
+    const pctTxt = (v) => (v == null || !isFinite(v)) ? "—" : `${v.toFixed(1)}%`;
+
+    const traces = [];
+    traces.push({
+      type: "scatter", mode: "lines", x, y: arv, yaxis: "y",
+      name: `ARV ${d.window || 20}d (${pctTxt(lastArv)})`,
+      line: { color: C.amber, width: 2 }, fill: "tozeroy", fillcolor: "rgba(255,164,24,.12)",
+      hovertemplate: "%{x}<br>ARV %{y:.1f}%<extra></extra>",
+    });
+    if (ivv != null) {
+      traces.push({
+        type: "scatter", mode: "lines", x, y: x.map(() => ivv), yaxis: "y",
+        name: `IV ATM (${pctTxt(ivv)})`, line: { color: C.cyan, width: 1.8, dash: "dash" },
+        hovertemplate: "IV ATM %{y:.1f}%<extra></extra>",
+      });
+    }
+    traces.push({
+      type: "scatter", mode: "lines", x, y: price, yaxis: "y2",
+      name: `${d.ticker || ""} (${fmtPrice(lastPx)})`, line: { color: C.white, width: 1.5 },
+      hovertemplate: `%{x}<br>${d.ticker || ""} $%{y:,.2f}<extra></extra>`,
+    });
+
+    const layout = Object.assign({}, BASE_LAYOUT, {
+      margin: { l: 56, r: 62, t: 64, b: 44 }, hovermode: "x unified",
+      annotations: [{ xref: "paper", yref: "paper", x: 0.5, xanchor: "center",
+        y: 1.14, yanchor: "bottom", showarrow: false,
+        text: `Volatility Drift · ${d.ticker || ""}`, font: { size: 12, color: C.text } }],
+      showlegend: true,
+      legend: { orientation: "h", x: 0.5, xanchor: "center", y: 1.02, font: { color: C.text, size: 11 } },
+      xaxis: { type: "category", tickmode: "auto", nticks: 12, gridcolor: C.grid, tickfont: { size: 9 }, showgrid: true },
+      yaxis: { title: { text: "Volatilidad anual (%)", font: { size: 10 } }, gridcolor: C.grid,
+        zeroline: false, ticksuffix: "%", tickfont: { size: 9 } },
+      yaxis2: { title: { text: `Precio ${d.ticker || ""}`, font: { size: 10, color: C.white } },
+        overlaying: "y", side: "right", zeroline: false, showgrid: false,
+        tickprefix: "$", tickfont: { size: 9, color: C.text } },
+    });
+    Plotly.react(el("volDrift"), traces, layout, CONFIG);
   }
 
   // ── view 8a: VOLATILITY — term structure (drift) ──────────────────────────
@@ -829,6 +889,7 @@
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
                path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
     drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
+    voldrift:{ plot: "volDrift",   symbolic: true,  path: (s) => `/api/volatility_drift/${s}`,   render: renderVolatilityDrift },
     vol:     { plot: "volChart",   symbolic: true,  sub: () => state.volMode,
                path: (s) => state.volMode === "surface" ? `/api/vol_surface/${s}` : `/api/vol_drift/${s}`,
                render: (d) => state.volMode === "surface" ? renderVolSurface(d) : renderVolDrift(d) },

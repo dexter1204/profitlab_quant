@@ -213,6 +213,7 @@
       <button class="tab" data-view="flow">Big Trades</button>
       <button class="tab" data-view="dsurf">Delta Surface</button>
       <button class="tab" data-view="drift">Net Drift</button>
+      <button class="tab" data-view="voldrift">Volatility Drift</button>
       <button class="tab" data-view="vol">Volatility</button>
     </nav>
   </div></div>
@@ -319,6 +320,14 @@
       <span class="hint">Dealer net dollar-delta if spot moved ±5% · upward slope = short-gamma (amplifies), downward = long-gamma (dampens)</span>
     </div>
     <div class="panel"><div id="netDrift" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── VOLATILITY DRIFT (IV vs ARV + price) ── -->
+  <section id="view-voldrift" class="view hidden">
+    <div class="toolbar">
+      <span class="hint">IV ATM (implícita) vs ARV (volatilidad realizada anualizada) + precio · ARV &gt; IV = el activo se mueve más de lo que las opciones descuentan</span>
+    </div>
+    <div class="panel"><div id="volDrift" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
   <!-- ── VOLATILITY ── -->
