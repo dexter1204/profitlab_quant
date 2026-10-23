@@ -135,6 +135,7 @@ a symbol, the Chart tab still shows the GEX profile and levels.
 2. Upload **all of `web/`** (the files, not the folder itself) to SiteGround so
    they land in `public_html/quantsistem/`:
    - `index.html` · `login.html` · `admin.html`
+   - `theme.css` · `theme.js` (shared Apple design system + light/dark toggle)
    - `config.js` · `auth.js` · `universe.js` · `app.js`
    - `plotly.min.js` (the charting library, served locally — no CDN)
 

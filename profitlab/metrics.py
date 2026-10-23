@@ -47,37 +47,43 @@ def _trough_strike(df: pd.DataFrame, column: str) -> Optional[float]:
 
 def _zero_crossing(
     df: pd.DataFrame, column: str, spot: Optional[float] = None,
-    band_pct: float = 0.10,
+    band_pct: float = 0.10, cumulative: bool = True,
 ) -> Optional[float]:
-    """Linear interpolation of the strike where the cumulative series
-    flips sign.
+    """Linear interpolation of the strike where a series flips sign.
 
-    When `spot` is supplied, restricts the search to strikes within
-    `band_pct` of spot — otherwise the cumulative-sum sign flip can pick
-    a nonsense crossing at deep-OTM strikes with tiny OI that doesn't
-    represent an actual dealer gamma flip. This is the standard SpotGamma
-    / MenthorQ convention.
+    `cumulative=True` crosses the cumulative (net) series — the classic
+    net-gamma flip. `cumulative=False` crosses the per-strike series, which
+    still finds the ATM negative→positive transition even when one side so
+    dominates that the cumulative never returns to zero.
+
+    When `spot` is supplied the search is restricted to strikes within
+    `band_pct` of spot, and (for multiple crossings) the one nearest spot is
+    returned — the standard SpotGamma / MenthorQ convention.
     """
     if df.empty:
         return None
-    view = df
+    view = df.sort_values("strike")
     if spot is not None:
-        lo = spot * (1 - band_pct)
-        hi = spot * (1 + band_pct)
-        view = df[(df["strike"] >= lo) & (df["strike"] <= hi)]
-        if view.empty:
-            view = df  # fall back to the full range
+        lo, hi = spot * (1 - band_pct), spot * (1 + band_pct)
+        band = view[(view["strike"] >= lo) & (view["strike"] <= hi)]
+        if not band.empty:
+            view = band
     xs = view["strike"].to_numpy(dtype=float)
-    ys = view[column].cumsum().to_numpy(dtype=float)
+    ys = (view[column].cumsum() if cumulative else view[column]).to_numpy(dtype=float)
     signs = np.sign(ys)
-    if np.all(signs >= 0) or np.all(signs <= 0):
+    flips = np.nonzero(np.diff(signs) != 0)[0]
+    if len(flips) == 0:
         return None
-    idx = int(np.argmax(np.diff(signs) != 0))
-    x0, x1 = xs[idx], xs[idx + 1]
-    y0, y1 = ys[idx], ys[idx + 1]
-    if y1 == y0:
-        return float(x0)
-    return float(x0 - y0 * (x1 - x0) / (y1 - y0))
+
+    def _interp(idx: int) -> float:
+        x0, x1 = xs[idx], xs[idx + 1]
+        y0, y1 = ys[idx], ys[idx + 1]
+        return float(x0) if y1 == y0 else float(x0 - y0 * (x1 - x0) / (y1 - y0))
+
+    crossings = [_interp(i) for i in flips]
+    if spot is not None:
+        return min(crossings, key=lambda x: abs(x - spot))
+    return crossings[0]
 
 
 def call_wall(gex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional[float]:
@@ -103,20 +109,44 @@ def put_wall(gex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional
 
 
 def gamma_flip(gex: pd.DataFrame, spot: Optional[float] = None) -> Optional[float]:
-    return _zero_crossing(gex, "gex", spot=spot)
+    """Zero-gamma level. Try the classic net (cumulative) crossing first;
+    when the profile is so one-sided that the net never returns to zero,
+    fall back to the per-strike ATM sign flip, then to a full-range net
+    crossing. This keeps the flip populated for put-heavy index chains."""
+    return (
+        _zero_crossing(gex, "gex", spot=spot, cumulative=True)
+        or _zero_crossing(gex, "gex", spot=spot, cumulative=False)
+        or _zero_crossing(gex, "gex", spot=None, cumulative=True)
+    )
 
 
 def delta_flip(dex: pd.DataFrame, spot: Optional[float] = None) -> Optional[float]:
-    return _zero_crossing(dex, "dex", spot=spot)
+    return (
+        _zero_crossing(dex, "dex", spot=spot, cumulative=True)
+        or _zero_crossing(dex, "dex", spot=spot, cumulative=False)
+    )
 
 
 def delta_wall(dex: pd.DataFrame, spot: float, band_pct: float = 0.10) -> Optional[float]:
-    """Largest positive-delta strike within ±band around spot."""
+    """Dominant delta-exposure strike near spot. Prefer the largest
+    positive-delta strike (call-side wall); when none is positive in the
+    band (a put-heavy chain), fall back to the largest ABSOLUTE delta strike
+    so the level is always populated."""
     lo, hi = spot * (1 - band_pct), spot * (1 + band_pct)
-    window = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi) & (dex["dex"] > 0)]
-    if window.empty:
-        window = dex[(dex["strike"] >= spot) & (dex["dex"] > 0)]
-    return _peak_strike(window, "dex")
+    pos = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi) & (dex["dex"] > 0)]
+    if not pos.empty:
+        return _peak_strike(pos, "dex")
+    pos = dex[(dex["strike"] >= spot) & (dex["dex"] > 0)]
+    if not pos.empty:
+        return _peak_strike(pos, "dex")
+    # put-heavy: no positive delta → strongest |delta| in the band
+    band = dex[(dex["strike"] >= lo) & (dex["strike"] <= hi)].copy()
+    if band.empty:
+        band = dex.copy()
+    if band.empty:
+        return None
+    band["mag"] = band["dex"].abs()
+    return _peak_strike(band, "mag")
 
 
 def major_neg_delta(dex: pd.DataFrame, spot: float,

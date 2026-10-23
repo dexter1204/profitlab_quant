@@ -10,14 +10,28 @@
   const el = (id) => document.getElementById(id);
   const DEFAULT_TICKER = "QQQ";
 
+  // Palette mirrors theme.css tokens and is refreshed from window.PLQ_THEME
+  // (set by theme.js) on boot and on every theme change. Render functions read
+  // C.* at draw time, so re-rendering after a theme change recolors everything.
   const C = {
-    // Gama del Aula ProfitLab (mismo diseño que la app)
-    bg: "#0A0B0E", panel: "#14161C", grid: "#1F222B", border: "#1F222B",
-    text: "#CBD5E1", muted: "#94A3B8", lime: "#C7F94C",
-    green: "#22c55e", red: "#ef4444", purple: "#a855f7",
-    cyan: "#06b6d4", amber: "#f59e0b", yellow: "#facc15",
+    bg: "#1c1c1e", panel: "#1c1c1e", grid: "rgba(255,255,255,.10)", border: "rgba(255,255,255,.16)",
+    zero: "rgba(255,255,255,.28)", text: "#f5f5f7", muted: "#a1a1a6", lime: "#C7F94C",
+    green: "#30d073", red: "#ff5247", purple: "#b483ff",
+    cyan: "#40c8ef", amber: "#ffa418", yellow: "#ffd60a", blue: "#4f8cff", white: "#e8eef7",
+    sceneBg: "rgba(0,0,0,0)", sceneGrid: "rgba(255,255,255,.14)",
   };
-  const FONT = { color: C.muted, family: "Manrope, sans-serif", size: 11 };
+  const FONT = { color: C.muted, family: "-apple-system, 'Inter', system-ui, sans-serif", size: 11 };
+  function syncPalette() {
+    const p = window.PLQ_THEME; if (!p) return;
+    C.bg = p.panel; C.panel = p.panel; C.grid = p.grid; C.border = p.border; C.zero = p.zero;
+    C.text = p.text; C.muted = p.muted; C.lime = p.accent;
+    C.green = p.green; C.red = p.red; C.purple = p.purple; C.cyan = p.cyan;
+    C.amber = p.amber; C.yellow = p.yellow; C.blue = p.blue; C.white = p.white;
+    C.sceneBg = p.scene_bg; C.sceneGrid = p.scene_grid;
+    C.tagBg = (window.PLQTheme && window.PLQTheme.get() === "light") ? "rgba(255,255,255,.82)" : "rgba(10,10,12,.72)";
+    FONT.color = p.muted;
+  }
+  syncPalette();
   // dragmode "pan" = drag to move, wheel to zoom (TradingView-style); no
   // rubber-band box zoom. scrollZoom in CONFIG enables the wheel.
   const BASE_LAYOUT = {
@@ -26,10 +40,8 @@
   };
   const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: true, doubleClick: "reset" };
 
-  // Versión APP vs WEB: la maqueta la decide cada HTML (index.html = 'web',
-  // app.html = 'app') fijando window.PLQ_MODE. Los gráficos usan ESE modo
-  // (márgenes, aspecto, cámara 3D) en vez de adivinar por el ancho de pantalla.
-  const isNarrow = () => (typeof window !== "undefined" && window.PLQ_MODE === "app");
+  // Desktop-only build (PC). No mobile layout branching anymore.
+  const isNarrow = () => false;
 
   // Config para las vistas 3D: scrollZoom permite acercar/alejar con la rueda
   // en PC y con el gesto de dos dedos (pinch) en celular. La rotación es con
@@ -102,7 +114,7 @@
       shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: val, y1: val,
         line: { color, width: 1.4, dash: "dot" } });
       anns.push({ xref: "paper", x: 1, xanchor: "right", yref: "y", y: val, yanchor: "bottom",
-        text: label, showarrow: false, font: { size: 9, color }, bgcolor: "rgba(5,7,11,.7)" });
+        text: label, showarrow: false, font: { size: 9, color }, bgcolor: C.tagBg });
     };
     add(d.spot, C.text, `SPOT ${fmtLevel(d.spot)}`);
     add(L.call_wall, C.green, "CALL WALL");
@@ -111,9 +123,85 @@
     return { shapes, anns };
   }
 
+  // Build a moving ticker tape from metric cells. Content is duplicated so the
+  // marquee loops seamlessly (the track animates translateX 0 → -50%).
+  function tapeHTML(cells) {
+    const chip = (x) => `<span class="chip ${x.c}"><b>${x.lbl}</b>` +
+      `<span class="cv">${x.v}</span>${x.s ? `<span class="cs ${x.sc || ""}">${x.s}</span>` : ""}</span>`;
+    const row = cells.map(chip).join("");
+    return `<div class="tape-track">${row}${row}</div>`;
+  }
+
+  // ── Reference bar: Call/Put walls (top-3) + key levels ────────────────────
+  // Persistent reference under the buscador, visible on every tab. Call walls
+  // = largest positive-GEX strikes, put walls = largest negative, both from
+  // the live /analyze payload. Vol Trigger mirrors the gamma flip (SpotGamma).
+  function renderReference(d) {
+    const box = el("refbar");
+    if (!box || !d) return;
+    const L = d.levels || {}, spot = d.spot;
+    const pairs = (d.strikes || []).map((k, i) => ({ k: Number(k), v: Number((d.gex || [])[i]) || 0 }))
+      .filter((p) => isFinite(p.k));
+    const calls = pairs.filter((p) => p.v > 0).sort((a, b) => b.v - a.v).slice(0, 3);
+    const puts = pairs.filter((p) => p.v < 0).sort((a, b) => a.v - b.v).slice(0, 3);
+
+    const pct = (lvl) => (lvl == null || spot == null || !isFinite(lvl) || !spot) ? null : ((lvl - spot) / spot) * 100;
+    const pctTag = (lvl) => {
+      const p = pct(lvl); if (p == null) return "";
+      const cls = p >= 0 ? "pos" : "neg";
+      return `<span class="rtag ${cls}">${p >= 0 ? "+" : ""}${p.toFixed(2)}%</span>`;
+    };
+    const wall = (arr, cls) => arr.length
+      ? arr.map((p) => `<div class="refrow"><span class="rk">$${fmtLevel(p.k)}</span><span class="rv ${cls}">${fmtBig(Math.abs(p.v))}</span></div>`).join("")
+      : `<div class="refrow"><span class="rlbl">—</span></div>`;
+
+    const flipTag = (spot != null && L.gamma_flip != null && isFinite(L.gamma_flip))
+      ? `<span class="rtag ${spot < L.gamma_flip ? "neg" : "pos"}">${spot < L.gamma_flip ? "Below" : "Above"}</span>`
+      : "";
+    const keyRows = [
+      ["Gamma Flip", L.gamma_flip, flipTag],
+      ["Vol Trigger", L.gamma_flip, pctTag(L.gamma_flip)],
+      ["Max Pain", L.max_pain, pctTag(L.max_pain)],
+      ["Delta Wall", L.delta_wall, pctTag(L.delta_wall)],
+      ["Major Neg Δ", L.major_neg_delta, pctTag(L.major_neg_delta)],
+    ].map(([lbl, v, tag]) => `<div class="refkey"><span class="kk">${lbl}</span>
+        <span class="kv">${v == null || !isFinite(v) ? "—" : "$" + fmtLevel(v)}${tag}</span></div>`).join("");
+
+    box.innerHTML = `
+      <div class="refcol"><div class="rx"><span class="dot call"></span>Call Walls</div>${wall(calls, "call")}</div>
+      <div class="refcol"><div class="rx"><span class="dot put"></span>Put Walls</div>${wall(puts, "put")}</div>
+      <div class="refcol"><div class="rx"><span class="dot key"></span>Key Levels</div><div class="refkeys">${keyRows}</div></div>`;
+  }
+
+  // Fetch /analyze for the reference bar with a WIDE strike window so the top
+  // call/put walls reflect the whole chain (not just the ±24 steps the Gamma
+  // view draws). Independent of the active view, cached server-side.
+  async function loadReference() {
+    try { renderReference(await fetchJSON(`/api/analyze/${state.symbol}?window=60`)); }
+    catch (_) { /* non-fatal — keep whatever the bar already shows */ }
+  }
+
+  // Surface a data-quality problem instead of drawing an empty/garbage chart.
+  function healthBanner(d) {
+    const h = d && d.health;
+    if (!h || h.ok) { if (h && h.warnings && h.warnings.length) setError(""); return false; }
+    const msg = (h.issues || []).join(" ") || "Datos insuficientes de la fuente.";
+    setError(`⚠️ Datos no disponibles para ${d.ticker || "este símbolo"}: ${msg}`);
+    return true;
+  }
+
   // ── view 1: GAMMA & FLOW ──────────────────────────────────────────────────
   function renderGamma(d) {
     const L = d.levels || {}, T = d.totals || {};
+    // Empty / unhealthy feed → clear message, don't draw a blank chart.
+    if (healthBanner(d) || !(d.strikes && d.strikes.length)) {
+      renderReference(d);
+      el("gammaChart").innerHTML =
+        '<div class="loading">Sin datos de la cadena para graficar. ' +
+        'Revisa el proveedor/plan o reintenta en un momento.</div>';
+      renderRegime(d);
+      return;
+    }
     const cells = [
       { c: "", lbl: "Spot", v: fmtPrice(d.spot), s: `as of ${(d.asof || "").slice(0, 10)}`, sc: "" },
       { c: "call", lbl: "Call Wall", v: fmtLevel(L.call_wall), s: "resistance", sc: "pos" },
@@ -123,21 +211,37 @@
       { c: "gamma", lbl: "Total GEX", v: fmtBig(T.gex), s: T.gex >= 0 ? "net long" : "net short", sc: T.gex >= 0 ? "pos" : "neg" },
       { c: "delta", lbl: "Total DEX", v: fmtBig(T.dex), s: T.dex >= 0 ? "net long" : "net short", sc: T.dex >= 0 ? "pos" : "neg" },
     ];
-    el("ribbon").innerHTML = cells.map((x) => `
-      <div class="cell ${x.c}">
-        <div class="lbl">${x.lbl}</div><div class="val">${x.v}</div>
-        <div class="sub ${x.sc}">${x.s}</div></div>`).join("");
+    const rib = el("ribbon"); rib.className = "tape"; rib.innerHTML = tapeHTML(cells);
 
-    const gexColors = (d.gex || []).map((v) => (v >= 0 ? C.green : C.red));
-    const gexBars = { type: "bar", orientation: "h", x: d.gex || [], y: d.strikes || [],
-      marker: { color: gexColors, line: { width: 0 } }, name: "GEX",
+    const strikesG = d.strikes || [];
+    const gexV = d.gex || [];
+    const gexColors = gexV.map((v) => (v >= 0 ? C.green : C.red));
+    // relief sizing: bar thickness + a drop-shadow sliver below each bar
+    const stepG = strikesG.length > 1 ? Math.abs(strikesG[1] - strikesG[0]) : 1;
+    const barW = stepG * 0.66;
+    const maxAbs = gexV.reduce((m, v) => Math.max(m, Math.abs(Number(v) || 0)), 0) || 1;
+    // $ labels only on the meaningful bars so the chart doesn't get noisy
+    const gexText = gexV.map((v) => (Math.abs(v) >= 0.16 * maxAbs ? fmtBig(v) : ""));
+    const isLight = window.PLQTheme && window.PLQTheme.get() === "light";
+
+    // shadow trace (drawn first → behind): a dark translucent copy shifted down
+    // a sliver so each bar appears lifted off the surface (fake 3-D depth).
+    const gexShadow = { type: "bar", orientation: "h", x: gexV, y: strikesG.map((s) => s - stepG * 0.16),
+      width: barW, marker: { color: isLight ? "rgba(0,0,0,.16)" : "rgba(0,0,0,.42)", line: { width: 0 } },
+      hoverinfo: "skip", showlegend: false, xaxis: "x", yaxis: "y", cliponaxis: false };
+
+    const gexBars = { type: "bar", orientation: "h", x: gexV, y: strikesG, width: barW,
+      marker: { color: gexColors, cornerradius: 5,
+        line: { color: isLight ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)", width: 1 } },
+      name: "GEX", text: gexText, textposition: "outside", cliponaxis: false,
+      textfont: { size: 9.5, color: gexColors, family: FONT.family },
       hovertemplate: "Strike %{y}<br>GEX %{x:$,.0f}<extra></extra>", xaxis: "x", yaxis: "y" };
     const dexLine = { type: "scatter", mode: "lines+markers", x: d.dex || [], y: d.dex_strikes || [],
       line: { color: C.cyan, width: 2 }, marker: { size: 4, color: C.cyan }, name: "DEX",
       hovertemplate: "Strike %{y}<br>DEX %{x:$,.0f}<extra></extra>", xaxis: "x2", yaxis: "y" };
     const { shapes, anns } = levelShapes(d, L);
     const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: isNarrow() ? { l: 44, r: 30, t: 44, b: 34 } : { l: 64, r: 70, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
+      margin: { l: 66, r: 96, t: 28, b: 36 }, barmode: "overlay", bargap: 0.18,
       showlegend: true, legend: { orientation: "h", x: 0, y: isNarrow() ? 1.16 : 1.08, font: { color: C.text } },
       shapes, annotations: anns,
       xaxis: { title: { text: "Gamma Exposure ($)", font: { size: 10 } }, zeroline: true,
@@ -149,7 +253,7 @@
       yaxis: { title: { text: "Strike", font: { size: 10 } }, gridcolor: C.grid, zeroline: false,
         tickfont: { size: 10 }, fixedrange: false },
     });
-    Plotly.react(el("gammaChart"), [gexBars, dexLine], layout, CONFIG);
+    Plotly.react(el("gammaChart"), [gexShadow, gexBars, dexLine], layout, CONFIG);
     renderRegime(d);
   }
   // Right-column exposure panel — ranks the live chain by absolute GEX (or
@@ -451,7 +555,7 @@
     // 2-D fallback heatmap
     const heat = {
       type: "heatmap", z: Zt, x: strikes, y: dte, zmid: 0, zmin: -cScale, zmax: cScale,
-      colorscale: [[0, C.red], [0.5, "#14161C"], [1, C.green]],
+      colorscale: [[0, C.red], [0.5, C.panel], [1, C.green]],
       colorbar: { title: { text: M, side: "right", font: { size: 9 } }, tickfont: { size: 8 },
         thickness: 10, tickformat: "$~s" },
       hovertemplate: "Strike %{x:,.0f}<br>%{y}D<br>" + M + " %{z:$,.0f}<extra></extra>",
@@ -542,9 +646,7 @@
       { c: callHeavy ? "call" : "put", lbl: "Sesgo", v: callHeavy ? "CALL HEAVY" : "PUT HEAVY", s: "del flujo $", sc: callHeavy ? "pos" : "neg" },
       { c: "gamma", lbl: "Nivel top", v: t.top_strike != null ? `$${fmtLevel(t.top_strike)}` : "—", s: "más $ hoy", sc: "" },
     ];
-    el("flowRibbon").innerHTML = cells.map((x) => `
-      <div class="cell ${x.c}"><div class="lbl">${x.lbl}</div>
-        <div class="val">${x.v}</div><div class="sub ${x.sc}">${x.s}</div></div>`).join("");
+    const frib = el("flowRibbon"); frib.className = "tape"; frib.innerHTML = tapeHTML(cells);
   }
 
   // WebGL available? (true even for software WebGL; false only if truly absent)
@@ -557,11 +659,12 @@
     } catch (_) { _webgl = false; }
     return _webgl;
   }
-  const SCENE_AX = (text) => ({ title: { text }, gridcolor: C.border, color: C.muted,
-    backgroundcolor: "rgba(0,0,0,0)", showbackground: true });
+  const SCENE_AX = (text) => ({ title: { text }, gridcolor: C.sceneGrid, color: C.muted,
+    backgroundcolor: C.sceneBg, showbackground: true });
 
   // ── view 6: DELTA SURFACE (3-D surface, 2-D heatmap fallback/toggle) ──────
-  const SURF_SCALE = [[0, C.red], [0.5, "#14161C"], [1, C.green]];
+  // diverging scale centered on the panel colour (adapts to light/dark)
+  const surfScale = () => [[0, C.red], [0.5, C.panel], [1, C.green]];
   let _dsurfData = null;
   function renderDeltaSurface(d) {
     _dsurfData = d;
@@ -569,7 +672,7 @@
     if (use3d) {
       const surf = {
         type: "surface", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
-        colorscale: SURF_SCALE, cmid: d.kind === "put" ? -0.5 : 0.5,
+        colorscale: surfScale(), cmid: d.kind === "put" ? -0.5 : 0.5,
         colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
         hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
       };
@@ -587,7 +690,7 @@
     }
     const heat = {
       type: "heatmap", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
-      colorscale: SURF_SCALE, zmid: d.kind === "put" ? -0.5 : 0.5,
+      colorscale: surfScale(), zmid: d.kind === "put" ? -0.5 : 0.5,
       colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
       hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
     };
@@ -608,7 +711,7 @@
   // ── view 7: NET DRIFT (intraday premium drift + price) ────────────────────
   function renderNetDrift(d) {
     const t = d.t || [], T = d.totals || {};
-    const BLUE = "#3b82f6", WHITE = "#e8eef7";
+    const BLUE = C.blue, WHITE = C.white;
     const callT = {
       type: "scatter", mode: "lines", x: t, y: d.call_drift || [], yaxis: "y",
       name: `Call Drift (${fmtBig(T.call_drift)})`, line: { color: C.red, width: 1.6 },
@@ -642,7 +745,7 @@
         gridcolor: C.grid, zeroline: true, zerolinecolor: C.border, tickfont: { size: 9 },
         tickformat: "$~s", anchor: "x" },
       yaxis2: { domain: [0, 0.46], title: { text: `Precio ${d.ticker || ""}`, font: { size: 10, color: WHITE } },
-        gridcolor: C.grid, zeroline: false, tickfont: { size: 9, color: "#cbd5e1" },
+        gridcolor: C.grid, zeroline: false, tickfont: { size: 9, color: C.text },
         tickprefix: "$", anchor: "x" },
     });
     Plotly.react(el("netDrift"), [callT, putT, priceT], layout, CONFIG);
@@ -740,14 +843,25 @@
     if (!force && state.loaded.has(key)) return;
     setError("");
     const hadPlot = !!(plotEl && plotEl.data);   // Plotly stores .data on the div
-    if (!hadPlot) plotEl.innerHTML = '<div class="loading">Cargando…</div>';
+    // On a cold start (Render free tier) the first request can take ~30-50s.
+    // Show a reassuring message after a few seconds so it doesn't look hung.
+    let slowTimer = null;
+    if (!hadPlot) {
+      plotEl.innerHTML = '<div class="loading">Cargando…</div>';
+      slowTimer = setTimeout(() => {
+        const l = plotEl.querySelector(".loading");
+        if (l) l.textContent = "Despertando el servidor (puede tardar ~30s la primera vez)…";
+      }, 4000);
+    }
     try {
       const data = await fetchJSON(def.path(state.symbol));
+      if (slowTimer) clearTimeout(slowTimer);
       // purge any existing plot so 3-D (WebGL) views re-render cleanly
       if (hadPlot) { try { Plotly.purge(plotEl); } catch (_) {} }
       def.render(data);
       state.loaded.add(key);
     } catch (e) {
+      if (slowTimer) clearTimeout(slowTimer);
       try { Plotly.purge(plotEl); } catch (_) {}
       plotEl.innerHTML = "";
       const label = def.symbolic ? ` de ${state.symbol}` : "";
@@ -773,6 +887,7 @@
     el("tkName").textContent = U.isFutures(pick) ? `${pick} → ${state.symbol}` : state.symbol;
     state.loaded.clear();   // every view is symbol-specific now
     loadView(state.view, { force: true });
+    loadReference();   // ref bar is symbol-specific, independent of the view
   }
 
   // ── account chrome ───────────────────────────────────────────────────────
@@ -868,7 +983,20 @@
       if (c && c.data) Plotly.Plots.resize(c);
     });
 
+    // Recolor every chart when the user flips light/dark. We refresh the
+    // palette and re-render the active view (cheap refetch keeps the code
+    // simple and guarantees traces, scales and scene axes all pick up C.*).
+    window.addEventListener("plq:themechange", () => {
+      syncPalette();
+      state.loaded.clear();
+      loadView(state.view, { force: true }).then(() => {
+        const c = el(VIEWS[state.view].plot);
+        if (c && c.data) Plotly.Plots.resize(c);
+      });
+    });
+
     switchTo("gamma");
+    loadReference();   // populate the reference bar on boot (wide strike scan)
   }
 
   // Gate the dashboard: valid Aula session + active quant access (coupon/pago).

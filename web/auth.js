@@ -10,7 +10,11 @@
   // independent. Credentials are still validated against the Aula accounts.
   const KEY = "plq_token";
 
-  const getToken = () => { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } };
+  const DEMO = !!window.PROFITLAB_DEMO;
+  const getToken = () => {
+    if (DEMO) return "demo";   // local review: always "signed in"
+    try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; }
+  };
   const setToken = (t) => { try { localStorage.setItem(KEY, t); } catch (_) {} };
   const clearToken = () => { try { localStorage.removeItem(KEY); } catch (_) {} };
   const goLogin = () => { location.href = "login.html"; };
@@ -18,7 +22,7 @@
 
   // ── SSO desde el Aula / super-app ────────────────────────────────────────
   // Cuando el Aula embebe este dashboard en un iframe, pasa el JWT del alumno
-  // por la URL: app.html#plq=<token> (o ?plq=<token>). Lo adoptamos como sesión
+  // por la URL: index.html#plq=<token> (o ?plq=<token>). Lo adoptamos como sesión
   // del quant y limpiamos la URL para no dejar el token a la vista. Sin esto el
   // iframe caía siempre en login.html aunque el alumno ya tuviera sesión y cupón.
   (function adoptSSOToken() {
@@ -70,6 +74,8 @@
   };
 
   // ── paywall (no access): redeem coupon or pay ────────────────────────────
+  // Uses the shared Apple theme (theme.css / theme.js) so it matches the rest
+  // of the app in light and dark.
   function showPaywall(st) {
     const name = (st.user && st.user.name) ? st.user.name : "";
     const priceTxt = money(st.price, st.currency);
@@ -78,35 +84,32 @@
     wrap.id = "pl-paywall";
     wrap.style.cssText =
       "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;" +
-      "background:radial-gradient(1200px 700px at 20% -20%, #14161C 0%, #0A0B0E 60%);" +
-      "font-family:'Manrope',system-ui,sans-serif;color:#CBD5E1;padding:24px";
+      "background:var(--bg-grad);padding:24px";
     wrap.innerHTML = `
-      <div style="width:100%;max-width:420px;background:#14161C;border:1px solid #1F222B;
-        border-radius:18px;padding:28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.5)">
-        <div style="font-size:20px;font-weight:800;color:#F1F5F9;letter-spacing:-.01em;text-align:center;font-family:'Bricolage Grotesque','Manrope',sans-serif">
-          Profit<span style="color:#C7F94C">Lab</span> Quant</div>
-        <p style="color:#94a3b8;font-size:14px;line-height:1.55;margin:16px 0 20px;text-align:center">
-          ${name ? "Hola <b style='color:#CBD5E1'>" + name + "</b>. " : ""}Activa tu acceso al dashboard.</p>
+      <div class="card rise" style="width:100%;max-width:420px;padding:32px 28px">
+        <div class="brand" style="font-size:24px;text-align:center">Profit<span>Lab</span> Quant</div>
+        <p class="muted" style="font-size:14px;line-height:1.55;margin:16px 0 22px;text-align:center">
+          ${name ? "Hola <b style='color:var(--text)'>" + name + "</b>. " : ""}Activa tu acceso al dashboard.</p>
 
-        <label style="display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#94A3B8;font-weight:700;margin-bottom:6px">Tengo un cupón</label>
+        <label class="lbl" style="display:block;margin-bottom:7px">Tengo un cupón</label>
         <div style="display:flex;gap:8px">
-          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;min-width:0;background:#0A0B0E;color:#F1F5F9;border:1px solid #1F222B;border-radius:11px;padding:13px 14px;min-height:48px;font-family:inherit;font-size:15px;text-transform:uppercase;letter-spacing:.1em;font-weight:700" />
-          <button id="pl-redeem" style="background:#C7F94C;color:#0A0B0E;border:0;border-radius:11px;padding:0 18px;min-height:48px;font-family:inherit;font-weight:800;cursor:pointer">Canjear</button>
+          <input id="pl-code" placeholder="CÓDIGO" style="flex:1;min-width:0;text-transform:uppercase;letter-spacing:.1em;font-weight:650" />
+          <button id="pl-redeem" class="btn primary" style="padding:0 20px">Canjear</button>
         </div>
-        <div id="pl-msg" style="font-size:13px;margin-top:10px;min-height:16px;color:#f87171"></div>
+        <div id="pl-msg" style="font-size:13px;margin-top:10px;min-height:16px;color:var(--red-soft)"></div>
 
-        <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#475569;font-size:11px">
-          <span style="flex:1;height:1px;background:#1F222B"></span>O<span style="flex:1;height:1px;background:#1F222B"></span>
+        <div style="display:flex;align-items:center;gap:10px;margin:20px 0;color:var(--text-3);font-size:11px">
+          <span style="flex:1;height:1px;background:var(--border)"></span>O<span style="flex:1;height:1px;background:var(--border)"></span>
         </div>
 
-        <button id="pl-pay" style="width:100%;background:#14161C;border:1px solid rgba(199,249,76,.5);color:#C7F94C;border-radius:12px;padding:14px;min-height:50px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer">
+        <button id="pl-pay" class="btn block" style="border-color:color-mix(in srgb, var(--accent) 50%, transparent);color:var(--accent-text);font-weight:600">
           Comprar acceso — ${priceTxt} · ${daysTxt}</button>
-        <div style="text-align:center;margin-top:16px"><a id="pl-logout" style="color:#94A3B8;font-size:12px;cursor:pointer">Cerrar sesión</a></div>
+        <div style="text-align:center;margin-top:18px"><a id="pl-logout" class="muted" style="font-size:12px;cursor:pointer">Cerrar sesión</a></div>
       </div>`;
     document.body.innerHTML = "";
     document.body.appendChild(wrap);
 
-    const msg = (t, ok) => { const m = document.getElementById("pl-msg"); m.textContent = t || ""; m.style.color = ok ? "#C7F94C" : "#f87171"; };
+    const msg = (t, ok) => { const m = document.getElementById("pl-msg"); m.textContent = t || ""; m.style.color = ok ? "var(--green-soft)" : "var(--red-soft)"; };
     document.getElementById("pl-logout").addEventListener("click", logout);
     document.getElementById("pl-redeem").addEventListener("click", async () => {
       const code = (document.getElementById("pl-code").value || "").trim().toUpperCase();
@@ -125,12 +128,18 @@
   // Gate a page. Resolves with the user when access is active; otherwise
   // redirects to the Aula login or renders the paywall and resolves null.
   async function guard() {
+    // Local demo: fake an active session so the dashboard renders without the
+    // Aula. The local backend (PROFITLAB_DEMO=1) also skips its own gate.
+    if (DEMO) {
+      return { user: { name: "Demo", email: "demo@local", role: "admin" },
+               has_access: true, lifetime: true, access_until: null };
+    }
     if (!getToken()) { goLogin(); return null; }
     let st;
     try { st = await aula("GET", "/quant/me"); }
     catch (e) {
       if (e.status === 401) { clearToken(); goLogin(); return null; }
-      document.body.innerHTML = '<div style="color:#f87171;font-family:system-ui;padding:40px">No se pudo contactar el Aula Virtual. Intenta de nuevo en un momento.</div>';
+      document.body.innerHTML = '<div style="color:var(--red-soft);font-family:var(--font, system-ui);padding:40px">No se pudo contactar el Aula Virtual. Intenta de nuevo en un momento.</div>';
       return null;
     }
     if (!st.has_access) { showPaywall(st); return null; }

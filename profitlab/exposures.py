@@ -32,6 +32,11 @@ class ChainContext:
     asof: pd.Timestamp
     r: float = 0.045  # continuously-compounded risk-free
     q: float = 0.0    # continuously-compounded dividend yield
+    # When True, use the vendor's own greeks (Polygon's `gamma`/`delta`
+    # columns) instead of recomputing them with Black-Scholes. Keeps the
+    # numbers identical to other Polygon-based tools. Falls back to the BS
+    # recompute per-contract wherever a vendor greek is missing/NaN.
+    use_vendor_greeks: bool = False
 
 
 def _time_to_expiry(expiries: pd.Series, asof: pd.Timestamp) -> np.ndarray:
@@ -54,6 +59,13 @@ def _prep(chain: pd.DataFrame, ctx: ChainContext):
     return t, is_call, strike, iv, oi
 
 
+def _vendor_col(chain: pd.DataFrame, name: str) -> np.ndarray | None:
+    """Return a chain greek column as floats, or None if absent."""
+    if name not in chain.columns:
+        return None
+    return pd.to_numeric(chain[name], errors="coerce").to_numpy(dtype=float)
+
+
 def gex_per_contract(chain: pd.DataFrame, ctx: ChainContext) -> np.ndarray:
     """GEX per contract in dollars per 1% move in spot.
 
@@ -61,6 +73,10 @@ def gex_per_contract(chain: pd.DataFrame, ctx: ChainContext) -> np.ndarray:
     """
     t, is_call, strike, iv, _ = _prep(chain, ctx)
     g = greeks.gamma(ctx.spot, strike, t, ctx.r, iv, ctx.q)
+    if ctx.use_vendor_greeks:
+        vg = _vendor_col(chain, "gamma")
+        if vg is not None:
+            g = np.where(np.isfinite(vg), vg, g)   # BS fallback where missing
     sign = np.where(is_call, 1.0, -1.0)
     return sign * g * CONTRACT_MULT * ctx.spot * ctx.spot * 0.01
 
@@ -71,6 +87,10 @@ def dex_per_contract(chain: pd.DataFrame, ctx: ChainContext) -> np.ndarray:
     d_call = greeks.delta(ctx.spot, strike, t, ctx.r, iv, ctx.q, "call")
     d_put = greeks.delta(ctx.spot, strike, t, ctx.r, iv, ctx.q, "put")
     d = np.where(is_call, d_call, d_put)
+    if ctx.use_vendor_greeks:
+        vd = _vendor_col(chain, "delta")   # vendor delta is already call/put-signed
+        if vd is not None:
+            d = np.where(np.isfinite(vd), vd, d)
     # Dealer short call → -delta_call exposure; dealer long put → +delta_put.
     sign = np.where(is_call, -1.0, 1.0)
     return sign * d * CONTRACT_MULT * ctx.spot

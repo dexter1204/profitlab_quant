@@ -125,6 +125,10 @@ def _token(authorization: str | None) -> str | None:
     return authorization.split(" ", 1)[1].strip() or None
 
 
+def _demo_mode() -> bool:
+    return os.environ.get("PROFITLAB_DEMO", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def require_access(authorization: str = Header(None)):
     """Gate for data endpoints.
 
@@ -132,6 +136,11 @@ def require_access(authorization: str = Header(None)):
     Aula API happens to be reachable, its confirmation. Access: when the Aula
     API answers (not blocked) its has_access decides; when it's blocked, a
     valid signed-in user is allowed and the frontend paywall governs coupons."""
+    # Local/offline demo: skip the Aula gate entirely so the dashboard can be
+    # reviewed without a login. Enable with PROFITLAB_DEMO=1 (never in prod).
+    if _demo_mode():
+        return {"id": "demo", "role": "admin", "name": "Demo"}
+
     tok = _token(authorization)
     if not tok:
         raise HTTPException(status_code=401, detail="No autenticado")

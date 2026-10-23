@@ -35,8 +35,25 @@ from fastapi import Depends  # noqa: E402
 
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
+from profitlab import dataquality  # noqa: E402
 
 from .aula import require_access  # noqa: E402  — access via the Aula Virtual
+
+
+def _use_vendor_greeks() -> bool:
+    """Use the vendor's own greeks (Polygon's gamma/delta) instead of our
+    Black-Scholes recompute. Toggle with PROFITLAB_USE_VENDOR_GREEKS=1."""
+    return os.environ.get("PROFITLAB_USE_VENDOR_GREEKS", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _ctx(spot: float, asof=None) -> "exposures.ChainContext":
+    return exposures.ChainContext(
+        spot=spot,
+        asof=asof or pd.Timestamp.now("UTC").tz_localize(None).normalize(),
+        use_vendor_greeks=_use_vendor_greeks(),
+    )
 
 app = FastAPI(title="ProfitLab Quant API", version="1.0")
 
@@ -100,8 +117,38 @@ def root():
 
 
 @app.get("/api/health")
-def health():
-    return {"ok": True, "vendor": pdata.vendor_name(), "ts": time.time()}
+def health(probe: str = Query(None, description="optional ticker to probe the live feed")):
+    """Liveness + optional data-feed probe. `?probe=QQQ` fetches a real chain
+    and reports whether the vendor/plan returns usable options data (contracts,
+    IV & OI coverage), so you can tell at a glance if the source is healthy and
+    whether it looks real-time or delayed."""
+    out = {
+        "ok": True,
+        "vendor": pdata.vendor_name(),
+        "greeks_source": "vendor" if _use_vendor_greeks() else "black_scholes",
+        "ts": time.time(),
+    }
+    if probe:
+        t = probe.upper().strip()
+        try:
+            chain = pdata.option_chain(t, max_expiries=2)
+            spot = pdata.spot(t)
+            rep = dataquality.assess_chain(chain, spot=spot)
+            # crude freshness read: does the chain carry live quotes?
+            has_quotes = bool(
+                chain is not None and len(chain)
+                and (("bid" in chain.columns and chain["bid"].notna().any())
+                     or ("last" in chain.columns and chain["last"].notna().any()))
+            )
+            out["probe"] = {
+                "ticker": t, "spot": _clean(spot),
+                "feed": "ok" if rep["ok"] else "degraded",
+                "has_live_quotes": has_quotes,
+                **rep,
+            }
+        except Exception as e:
+            out["probe"] = {"ticker": t, "feed": "error", "error": str(e)}
+    return out
 
 
 def _strike_step(strikes) -> float:
@@ -114,10 +161,8 @@ def _gamma_payload(ticker: str, window: int) -> dict:
     """Core Gamma & Flow computation shared by /analyze and /chart."""
     chain = pdata.option_chain(ticker)
     spot = pdata.spot(ticker)
-    ctx = exposures.ChainContext(
-        spot=spot,
-        asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
-    )
+    ctx = _ctx(spot)
+    health = dataquality.assess_chain(chain, spot=spot, asof=ctx.asof)
     gex = exposures.gex_by_strike(chain, ctx)
     dex = exposures.dex_by_strike(chain, ctx)
     totals = exposures.totals(chain, ctx)
@@ -133,6 +178,8 @@ def _gamma_payload(ticker: str, window: int) -> dict:
     return {
         "ticker": ticker,
         "vendor": pdata.vendor_name(),
+        "greeks_source": "vendor" if ctx.use_vendor_greeks else "black_scholes",
+        "health": health,
         "spot": _clean(spot),
         "asof": ctx.asof.isoformat(),
         "levels": {k: _clean(v) for k, v in levels.items()},
@@ -326,7 +373,7 @@ def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60),
         chain = pdata.option_chain(ticker, max_expiries=exp)
         spot = pdata.spot(ticker)
         asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
-        ctx = exposures.ChainContext(spot=spot, asof=asof)
+        ctx = _ctx(spot, asof)
 
         gex_grid = exposures.gex_by_strike_expiry(chain, ctx)
         dex_grid = exposures.dex_by_strike_expiry(chain, ctx)

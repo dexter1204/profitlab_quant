@@ -40,10 +40,12 @@ def _vendor_module():
         from . import polygon as mod
     elif name in ("polygon_mcp", "polygon-mcp", "api.market", "mcp"):
         from . import polygon_mcp as mod
+    elif name in ("demo", "mock", "offline"):
+        from . import demo_vendor as mod
     else:
         raise ValueError(
             f"Unknown PROFITLAB_VENDOR={name!r}. "
-            "Set it to 'yfinance', 'polygon', or 'polygon_mcp'."
+            "Set it to 'yfinance', 'polygon', 'polygon_mcp' or 'demo'."
         )
     return mod
 

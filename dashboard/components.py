@@ -45,6 +45,64 @@ def _pct_from_spot(level: Optional[float], spot: float) -> str:
     return f"<span class='delta {color}'>{pct:+.2f}%</span>"
 
 
+# ── reference bar (Call/Put walls + key levels) ─────────────────────────────
+def _ref_tag_pct(level: Optional[float], spot: float) -> str:
+    if level is None or pd.isna(level) or not spot:
+        return ""
+    pct = (level - spot) / spot * 100.0
+    cls = "pos" if pct >= 0 else "neg"
+    return f"<span class='rtag {cls}'>{pct:+.2f}%</span>"
+
+
+def reference_bar(levels: dict, gex: "pd.DataFrame", spot: float) -> None:
+    """SpotGamma-style reference panel rendered under the buscador: the top-3
+    call walls (largest +GEX strikes) and put walls (largest −GEX), plus the
+    key levels. Vol Trigger mirrors the gamma flip, as on SpotGamma."""
+    g = gex.dropna(subset=["gex"]) if gex is not None else None
+    calls, puts = [], []
+    if g is not None and len(g):
+        c = g[g["gex"] > 0].sort_values("gex", ascending=False).head(3)
+        p = g[g["gex"] < 0].sort_values("gex", ascending=True).head(3)
+        calls = [(float(r.strike), float(r.gex)) for r in c.itertuples(index=False)]
+        puts = [(float(r.strike), float(r.gex)) for r in p.itertuples(index=False)]
+
+    def _walls(arr, cls):
+        if not arr:
+            return "<div class='pl-refrow'><span class='rlbl'>—</span></div>"
+        return "".join(
+            f"<div class='pl-refrow'><span class='rk'>{_fmt_level(k)}</span>"
+            f"<span class='rv {cls}'>{_fmt_money(abs(v))}</span></div>"
+            for k, v in arr
+        )
+
+    gf = levels.get("gamma_flip")
+    flip_tag = ""
+    if gf is not None and not pd.isna(gf) and spot:
+        below = spot < gf
+        flip_tag = f"<span class='rtag {'neg' if below else 'pos'}'>{'Below' if below else 'Above'}</span>"
+    key_rows = [
+        ("Gamma Flip", gf, flip_tag),
+        ("Vol Trigger", gf, _ref_tag_pct(gf, spot)),
+        ("Max Pain", levels.get("max_pain"), _ref_tag_pct(levels.get("max_pain"), spot)),
+        ("Delta Wall", levels.get("delta_wall"), _ref_tag_pct(levels.get("delta_wall"), spot)),
+        ("Major Neg Δ", levels.get("major_neg_delta"), _ref_tag_pct(levels.get("major_neg_delta"), spot)),
+    ]
+    keys_html = "".join(
+        f"<div class='pl-refkey'><span class='kk'>{lbl}</span>"
+        f"<span class='kv'>{_fmt_level(v)}{tag}</span></div>"
+        for lbl, v, tag in key_rows
+    )
+
+    st.markdown(
+        "<div class='pl-refbar'>"
+        f"<div class='pl-refcol'><div class='rx'><span class='dot call'></span>Call Walls</div>{_walls(calls, 'call')}</div>"
+        f"<div class='pl-refcol'><div class='rx'><span class='dot put'></span>Put Walls</div>{_walls(puts, 'put')}</div>"
+        f"<div class='pl-refcol'><div class='rx'><span class='dot key'></span>Key Levels</div><div class='pl-refkeys'>{keys_html}</div></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ── page title ─────────────────────────────────────────────────────────────
 def page_title(ticker: str, is_demo: bool, vendor: str = "") -> None:
     if is_demo:
@@ -71,6 +129,12 @@ def _cell(cls: str, label: str, value: str, sub: str = "") -> str:
     )
 
 
+def _chip(cls: str, label: str, value: str, sub: str = "") -> str:
+    """One metric as a ticker-tape chip (used by the moving metric strip)."""
+    sub_html = f"<span class='cs'>{sub}</span>" if sub else ""
+    return f"<span class='pl-chip {cls}'><b>{label}</b><span class='cv'>{value}</span>{sub_html}</span>"
+
+
 def metric_strip(spot: float, levels: dict, totals: dict) -> None:
     def rel(k: str) -> str:
         return _pct_from_spot(levels.get(k), spot)
@@ -85,27 +149,31 @@ def metric_strip(spot: float, levels: dict, totals: dict) -> None:
     vanna_t = totals.get("vanna", 0.0)
     charm_t = totals.get("charm", 0.0)
 
-    cells = [
-        _cell("spot",  "SPOT PRICE",    f"${spot:,.2f}"),
-        _cell("call",  "CALL WALL",     _fmt_level(levels.get("call_wall")),  rel("call_wall")),
-        _cell("put",   "PUT WALL",      _fmt_level(levels.get("put_wall")),   rel("put_wall")),
-        _cell("gamma", "GAMMA FLIP",    _fmt_level(levels.get("gamma_flip")), flip_sub("gamma_flip")),
-        _cell("pain",  "MAX PAIN",      _fmt_level(levels.get("max_pain")),   rel("max_pain")),
-        _cell("delta", "DELTA WALL",    _fmt_level(levels.get("delta_wall")), rel("delta_wall")),
-        _cell("delta", "MAJOR NEG Δ",   _fmt_level(levels.get("major_neg_delta")), rel("major_neg_delta")),
-        _cell("gamma", "DELTA FLIP",    _fmt_level(levels.get("delta_flip")),
+    chips = [
+        _chip("spot",  "SPOT PRICE",    f"${spot:,.2f}"),
+        _chip("call",  "CALL WALL",     _fmt_level(levels.get("call_wall")),  rel("call_wall")),
+        _chip("put",   "PUT WALL",      _fmt_level(levels.get("put_wall")),   rel("put_wall")),
+        _chip("gamma", "GAMMA FLIP",    _fmt_level(levels.get("gamma_flip")), flip_sub("gamma_flip")),
+        _chip("pain",  "MAX PAIN",      _fmt_level(levels.get("max_pain")),   rel("max_pain")),
+        _chip("delta", "DELTA WALL",    _fmt_level(levels.get("delta_wall")), rel("delta_wall")),
+        _chip("delta", "MAJOR NEG Δ",   _fmt_level(levels.get("major_neg_delta")), rel("major_neg_delta")),
+        _chip("gamma", "DELTA FLIP",    _fmt_level(levels.get("delta_flip")),
               "Dealers Sell" if levels.get("delta_flip") and spot > levels["delta_flip"] else
               ("Dealers Buy" if levels.get("delta_flip") else "")),
-        _cell("spot",  "GEX",           _fmt_money(gex),
+        _chip("spot",  "GEX",           _fmt_money(gex),
               f"<span class='dot' style='color:{S.GREEN if gex >= 0 else S.RED}'></span>"
               f"{'Long γ' if gex >= 0 else 'Short γ'}"),
-        _cell("spot",  "VANNA",         f"{vanna_t:,.2f}",
+        _chip("spot",  "VANNA",         f"{vanna_t:,.2f}",
               f"<span class='dot' style='color:{S.GREEN if vanna_t >= 0 else S.RED}'></span>"
               f"{'Bullish' if vanna_t >= 0 else 'Bearish'}"),
-        _cell("spot",  "CHARM",         f"{charm_t:,.2f}",
+        _chip("spot",  "CHARM",         f"{charm_t:,.2f}",
               f"<span class='dot' style='color:{S.MUTED}'></span>Neutral"),
     ]
-    st.markdown(f"<div class='pl-ribbon'>{''.join(cells)}</div>", unsafe_allow_html=True)
+    row = "".join(chips)
+    st.markdown(
+        f"<div class='pl-tape'><div class='pl-tape-track'>{row}{row}</div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ── GEX + DEX bar pair ─────────────────────────────────────────────────────
@@ -167,7 +235,7 @@ def gex_dex_pair(
     )
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         height=680,
@@ -268,7 +336,7 @@ def exposure_heatmap(
                 text_color[i, j] = "rgba(0,0,0,0)"
             else:
                 text[i, j] = _fmt_millions(v)
-                text_color[i, j] = "rgba(226,232,240,0.95)"
+                text_color[i, j] = S.TEXT_STRONG
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -283,8 +351,8 @@ def exposure_heatmap(
             colorscale=[
                 (0.0,  "#7f1d1d"),   # -zmax → deep red
                 (0.30, "#ef4444"),   # red
-                (0.48, "#0b1220"),   # near zero → panel bg
-                (0.52, "#0b1220"),
+                (0.48, S.BG_PANEL),   # near zero → panel bg
+                (0.52, S.BG_PANEL),
                 (0.70, "#3b82f6"),   # blue
                 (1.0,  "#1e3a8a"),   # +zmax → deep blue
             ],
@@ -305,7 +373,7 @@ def exposure_heatmap(
     )
     row_h = 26
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         height=max(420, min(920, row_h * len(grid.index) + 100)),
@@ -523,12 +591,12 @@ def oi_heatmap(
     text = np.array([[_fmt(v) for v in row] for row in z], dtype=object)
 
     if mode == "total":
-        colorscale = [(0.0, "#0b1220"), (1.0, "#3b82f6")]
+        colorscale = [(0.0, S.BG_PANEL), (1.0, "#3b82f6")]
         zmin, zmid = 0.0, None
     else:
         colorscale = [
             (0.0, "#7f1d1d"), (0.30, "#ef4444"),
-            (0.48, "#0b1220"), (0.52, "#0b1220"),
+            (0.48, S.BG_PANEL), (0.52, S.BG_PANEL),
             (0.70, S.GREEN), (1.0, "#14532d"),
         ]
         zmin, zmid = -zmax, 0.0
@@ -546,7 +614,7 @@ def oi_heatmap(
     ))
     row_h = 26
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=max(420, min(920, row_h * len(grid.index) + 100)),
         margin=dict(l=64, r=48, t=48, b=24),
@@ -614,7 +682,7 @@ def net_drift_chart(drift: pd.DataFrame, spot: float, levels: dict) -> go.Figure
                            font=dict(color=color, size=10, family="Inter, system-ui"))
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=560, margin=dict(l=48, r=48, t=40, b=40),
         xaxis=dict(title="Spot Price ($)", tickformat="$,.2f",
@@ -660,7 +728,7 @@ def vol_drift_chart(term: pd.DataFrame) -> go.Figure:
         hovertemplate="dte=%{x}<br>skew=%{y:.2f}%<extra></extra>",
     ), row=2, col=1)
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=560, margin=dict(l=48, r=48, t=40, b=40),
         font=dict(color=S.TEXT, family="Inter, system-ui"),
@@ -713,7 +781,7 @@ def vol_surface(iv_grid: pd.DataFrame, spot: float, asof: pd.Timestamp) -> go.Fi
         return base
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=680, margin=dict(l=0, r=0, t=30, b=0),
         scene=dict(
@@ -791,7 +859,7 @@ def oi_distribution(
     ))
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         barmode="overlay",
@@ -1112,7 +1180,7 @@ def price_chart(
     )
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         autosize=True,
@@ -1206,7 +1274,7 @@ def delta_surface(
         return base
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         height=680,
@@ -1251,7 +1319,7 @@ def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> str:
 
 def _cell_color(pct: float, cap: float = 0.04) -> str:
     """Diverging red↔black↔green based on daily % change."""
-    dark = _hex_to_rgb("#0b1220")
+    dark = _hex_to_rgb(S.BG_PANEL)
     green = _hex_to_rgb(S.GREEN)
     red = _hex_to_rgb(S.RED)
     t = max(-1.0, min(1.0, pct / cap))
@@ -1387,7 +1455,7 @@ def market_heatmap(df: pd.DataFrame,
                 xanchor="center", yanchor="bottom",
                 text=f"${c.price:,.2f}",
                 showarrow=False,
-                font=dict(color="rgba(226,232,240,0.55)", size=price_font,
+                font=dict(color=S.MUTED, size=price_font,
                           family="Inter, system-ui"),
             )
 
@@ -1407,7 +1475,7 @@ def market_heatmap(df: pd.DataFrame,
     ))
 
     fig.update_layout(
-        template="plotly_dark",
+        template=S.PLOTLY_TEMPLATE,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=6, r=6, t=6, b=6),

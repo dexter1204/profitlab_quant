@@ -70,6 +70,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# Resolve the Apple light/dark theme from the sidebar toggle (persisted in
+# session state by the `pl_theme` widget) BEFORE injecting CSS or drawing any
+# Plotly chart, so the whole page — chrome and charts — paints one theme.
+styles.set_theme(st.session_state.get("pl_theme", "dark"))
 styles.inject()
 _load_secrets_into_env()
 
@@ -108,6 +112,17 @@ def _load_bars(ticker: str, use_demo: bool, interval: str, period: str) -> pd.Da
 
 
 def _sidebar_controls():
+    # Apariencia — Apple light / dark. Changing it reruns the app; the new
+    # value is read at the top of the script to re-theme chrome + charts.
+    st.sidebar.radio(
+        "Apariencia",
+        options=["dark", "light"],
+        format_func=lambda m: "🌙 Oscuro" if m == "dark" else "☀️ Claro",
+        horizontal=True,
+        key="pl_theme",
+        label_visibility="collapsed",
+    )
+
     st.sidebar.header("Controls")
 
     # Data is always live via the configured vendor (from
@@ -527,6 +542,20 @@ def main() -> None:
             label_visibility="collapsed",
             key="view_selector",
         )
+
+    # Reference panel under the buscador (Call/Put walls + key levels),
+    # visible on every view. Best-effort: never breaks the page.
+    try:
+        _ref_chain, _ref_spot = _load_chain(ticker, use_demo)
+        _ref_ctx = exposures.ChainContext(
+            spot=_ref_spot, asof=pd.Timestamp.now("UTC").tz_localize(None).normalize()
+        )
+        _ref_gex = exposures.gex_by_strike(_ref_chain, _ref_ctx)
+        _ref_dex = exposures.dex_by_strike(_ref_chain, _ref_ctx)
+        _ref_levels = metrics.key_levels(_ref_chain, _ref_gex, _ref_dex, _ref_spot).as_dict()
+        components.reference_bar(_ref_levels, _ref_gex, _ref_spot)
+    except Exception:
+        pass
 
     if view == "Gamma & Flow":
         _render_gamma_flow(ticker, use_demo, window, positions_df)

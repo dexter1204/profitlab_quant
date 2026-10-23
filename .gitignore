@@ -20,3 +20,8 @@ quantsistem-web.zip
 *.zip
 
 node_modules/
+
+# Skills instaladas con "npx skills" (no son parte del proyecto)
+.agents/
+.claude/
+skills-lock.json
