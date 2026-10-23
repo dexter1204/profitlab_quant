@@ -78,7 +78,7 @@ styles.inject()
 _load_secrets_into_env()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def _load_chain(ticker: str, use_demo: bool) -> tuple[pd.DataFrame, float]:
     if use_demo:
         chain = demo.demo_chain(ticker)
@@ -94,7 +94,7 @@ def _load_prices(use_demo: bool) -> dict[str, pd.Series]:
     return data.price_history_batch(TICKERS + ["SPY"], period="1y")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def _load_market(use_demo: bool) -> pd.DataFrame:
     if use_demo:
         return market.demo_heatmap()

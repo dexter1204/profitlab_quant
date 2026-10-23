@@ -84,7 +84,11 @@ GATED = [Depends(require_access)]
 
 # ── tiny in-memory TTL cache (keeps Polygon calls light) ─────────────────────
 _CACHE: dict[str, tuple[float, object]] = {}
-_TTL = float(os.environ.get("PROFITLAB_CACHE_TTL", "300"))  # seconds
+# Short TTL so prices/levels stay close to live (auto-refresh in the frontend
+# re-fetches on this cadence). It's a SHARED server cache — one vendor call per
+# window per (view·ticker) no matter how many viewers. Raise PROFITLAB_CACHE_TTL
+# in Render if you ever need to spare API calls.
+_TTL = float(os.environ.get("PROFITLAB_CACHE_TTL", "30"))  # seconds
 
 
 def _cached(key: str, producer):

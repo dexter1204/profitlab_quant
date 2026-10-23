@@ -190,19 +190,46 @@ def _spot_from_options(ticker: str) -> Optional[float]:
     return None
 
 
+def _spot_from_aggs(ticker: str) -> Optional[float]:
+    """Latest traded price from the aggregates feed — the most accurate spot
+    (matches the tape / TradingView). Tries the last intraday minute close,
+    then the previous daily close. Returns None if aggregates aren't entitled
+    on this plan (so we fall back to the options-derived spot)."""
+    try:
+        df = intraday_bars(ticker, interval="1m", period="1d")
+        if df is not None and len(df):
+            c = float(df["close"].iloc[-1])
+            if c > 0:
+                return c
+    except Exception:
+        pass
+    try:
+        r = _get(f"/v2/aggs/ticker/{ticker.upper()}/prev", {"adjusted": "true"})
+        res = r.get("results") or []
+        if res and res[0].get("c"):
+            return float(res[0]["c"])
+    except Exception:
+        pass
+    return None
+
+
 def spot(ticker: str) -> float:
-    """Spot price derived entirely from options endpoints (Options plan):
-    the underlying price embedded in the options snapshot, or — if absent —
-    the max-OI (≈ATM) strike as a proxy. Never calls stocks endpoints, so
-    it can't 429 on an Options-only plan."""
+    """Spot price. Prefers the latest aggregate close (accurate, matches the
+    tape) and falls back to the options-snapshot underlying / parity / max-OI
+    proxy on Options-only plans where stock aggregates aren't entitled. Some
+    resellers return a stale `underlying_asset.price`, so aggregates first
+    avoids a spot that disagrees with the chart and TradingView."""
     ticker = ticker.upper()
     _api_key()  # raise the clear "POLYGON_API_KEY not set" error up front
+    px = _spot_from_aggs(ticker)
+    if px and px > 0:
+        return float(px)
     px = _spot_from_options(ticker)
     if px:
         return float(px)
     raise RuntimeError(
-        f"Polygon: couldn't derive a spot for {ticker!r} from the options "
-        f"snapshot — it may have no listed options on this plan."
+        f"Polygon: couldn't derive a spot for {ticker!r} from aggregates or the "
+        f"options snapshot — it may have no listed options on this plan."
     )
 
 

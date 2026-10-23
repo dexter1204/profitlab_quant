@@ -31,9 +31,27 @@
   .subbar { position: sticky; top: var(--appbar-h); z-index: 30; }
   .subbar .row { display: flex; align-items: center; gap: 22px; padding: 12px 0; flex-wrap: wrap; }
   .tickrow { display: flex; align-items: center; gap: 14px; }
-  .selector { width: 300px; }
-  .selector input { padding-right: 34px; font-weight: 600; text-transform: uppercase; }
+  .selector { position: relative; width: 300px; }
+  .selector input { padding-right: 38px; font-weight: 600; text-transform: uppercase; }
   .selector input::placeholder { text-transform: none; font-weight: 400; }
+  .selector .chev { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    height: 34px; width: 32px; display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 0; color: var(--text-3); cursor: pointer; font-size: 12px;
+    border-radius: 8px; transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+  .selector .chev:hover { color: var(--text); }
+  .selector[aria-open="true"] .chev { transform: translateY(-50%) rotate(180deg); color: var(--text); }
+  /* Custom dropdown panel — shows ALL assets grouped; filters as you type */
+  .combo-panel { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 60;
+    max-height: min(62vh, 440px); overflow: auto; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 6px;
+    animation: rise var(--dur-fast) var(--spring) both; }
+  .combo-group { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3);
+    font-weight: 650; padding: 9px 10px 4px; position: sticky; top: 0; background: var(--surface); }
+  .combo-opt { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 550; color: var(--text); }
+  .combo-opt:hover, .combo-opt.active { background: var(--surface-2); }
+  .combo-opt .mapto { color: var(--text-3); font-size: 11px; font-weight: 500; }
+  .combo-empty { padding: 10px; color: var(--text-2); font-size: 13px; }
   .assetname { font-size: 14px; color: var(--text-2); white-space: nowrap; }
   .assetname b { color: var(--text); font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
   .tabs { flex: 1; justify-content: flex-end; }
@@ -178,11 +196,11 @@
 
   <div class="subbar material"><div class="wrap row">
     <div class="tickrow">
-      <div class="selector">
-        <input id="ticker" list="tickerList" autocomplete="off" spellcheck="false"
+      <div class="selector" id="tickerCombo">
+        <input id="ticker" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false"
                aria-label="Buscar activo" placeholder="Busca o escribe un símbolo…" />
-        <datalist id="tickerList"></datalist>
-        <span class="chev">▾</span>
+        <button class="chev" id="tickerChev" type="button" aria-label="Ver todos los activos">▾</button>
+        <div class="combo-panel hidden" id="tickerPanel" role="listbox"></div>
       </div>
       <span class="assetname"><b id="tkName">QQQ</b></span>
     </div>

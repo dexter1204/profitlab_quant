@@ -890,6 +890,63 @@
     loadReference();   // ref bar is symbol-specific, independent of the view
   }
 
+  // ── ticker combobox ───────────────────────────────────────────────────────
+  // A real dropdown: clicking the arrow shows ALL assets (grouped); typing
+  // filters; a symbol not in the list still loads on Enter (any plan symbol).
+  function setupTickerCombo(input) {
+    const wrap = el("tickerCombo"), panel = el("tickerPanel"), chev = el("tickerChev");
+    const GROUPS = [
+      ["Options · stocks & ETFs", U.OPTIONS],
+      ["Futures → índice", U.FUTURES],
+      ["Indices", U.INDICES],
+    ];
+    let open = false, items = [], active = -1;
+
+    function build(filter) {
+      const f = (filter || "").trim().toUpperCase();
+      panel.innerHTML = ""; items = []; active = -1;
+      for (const [label, syms] of GROUPS) {
+        const matched = syms.filter((s) =>
+          !f || s.includes(f) || (U.isFutures(s) && U.FUTURES_MAP[s].includes(f)));
+        if (!matched.length) continue;
+        const g = document.createElement("div"); g.className = "combo-group"; g.textContent = label;
+        panel.appendChild(g);
+        for (const s of matched) {
+          const o = document.createElement("div"); o.className = "combo-opt"; o.dataset.sym = s;
+          o.innerHTML = `<span>${s}</span>` + (U.isFutures(s) ? `<span class="mapto">→ ${U.FUTURES_MAP[s]}</span>` : "");
+          o.addEventListener("mousedown", (e) => { e.preventDefault(); choose(s); });
+          panel.appendChild(o); items.push(o);
+        }
+      }
+      if (!items.length) {
+        const e = document.createElement("div"); e.className = "combo-empty";
+        e.textContent = f ? `Pulsa Enter para cargar “${f}”` : "Sin resultados";
+        panel.appendChild(e);
+      }
+    }
+    function openPanel(filter) { build(filter); panel.classList.remove("hidden"); wrap.setAttribute("aria-open", "true"); input.setAttribute("aria-expanded", "true"); open = true; }
+    function closePanel() { panel.classList.add("hidden"); wrap.removeAttribute("aria-open"); input.setAttribute("aria-expanded", "false"); open = false; active = -1; }
+    function choose(sym) { input.value = sym; closePanel(); if (sym && sym !== state.pick) onTickerChange(sym); }
+    function highlight(i) { active = i; items.forEach((it, k) => it.classList.toggle("active", k === i)); if (items[i]) items[i].scrollIntoView({ block: "nearest" }); }
+
+    chev.addEventListener("mousedown", (e) => { e.preventDefault(); if (open) closePanel(); else { openPanel(""); input.focus(); } });
+    input.addEventListener("focus", () => openPanel(input.value));
+    input.addEventListener("input", () => openPanel(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); if (!open) { openPanel(input.value); return; }
+        let i = active + (e.key === "ArrowDown" ? 1 : -1);
+        i = Math.max(0, Math.min(items.length - 1, i)); highlight(i);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (active >= 0 && items[active]) choose(items[active].dataset.sym);
+        else { const v = (input.value || "").trim().toUpperCase(); closePanel(); if (v && v !== state.pick) onTickerChange(v); }
+      } else if (e.key === "Escape") { closePanel(); input.blur(); }
+    });
+    document.addEventListener("mousedown", (e) => { if (open && !wrap.contains(e.target)) closePanel(); });
+    input.value = DEFAULT_TICKER;
+  }
+
   // ── account chrome ───────────────────────────────────────────────────────
   function renderAccount(st) {
     const user = st.user || {};
@@ -913,13 +970,7 @@
 
   // ── boot ────────────────────────────────────────────────────────────────
   function init() {
-    const sel = el("ticker");
-    U.populate(sel, DEFAULT_TICKER);
-    // Picking from the datalist OR typing any symbol the plan supports both
-    // fire "change" (on commit/Enter/blur). Enter also commits explicitly.
-    const commitTicker = () => { const v = (sel.value || "").trim().toUpperCase(); if (v && v !== state.pick) onTickerChange(v); };
-    sel.addEventListener("change", commitTicker);
-    sel.addEventListener("keydown", (e) => { if (e.key === "Enter") { sel.blur(); commitTicker(); } });
+    setupTickerCombo(el("ticker"));
 
     for (const t of document.querySelectorAll(".tab"))
       t.addEventListener("click", () => switchTo(t.dataset.view));
@@ -1001,6 +1052,24 @@
 
     switchTo("gamma");
     loadReference();   // populate the reference bar on boot (wide strike scan)
+
+    // Auto-refresh: keep prices/levels close to live without a manual reload.
+    // Re-fetches the active view + the reference bar every REFRESH_MS. Pauses
+    // when the tab is hidden, and skips a 3-D surface that's currently shown
+    // so an in-progress rotation isn't reset under the user's hands.
+    const REFRESH_MS = 30000;
+    const isThreeDNow = () => state.surf3d &&
+      (state.view === "spectrum" || state.view === "dsurf" ||
+       (state.view === "vol" && state.volMode === "surface"));
+    setInterval(() => {
+      if (document.hidden) return;
+      loadReference();
+      if (isThreeDNow()) return;
+      loadView(state.view, { force: true }).then(() => {
+        const c = el(VIEWS[state.view].plot);
+        if (c && c.data) Plotly.Plots.resize(c);
+      });
+    }, REFRESH_MS);
   }
 
   // Gate the dashboard: valid Aula session + active quant access (coupon/pago).
