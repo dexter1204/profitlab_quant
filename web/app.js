@@ -1047,12 +1047,98 @@
     if (!candles.length) setError(`Sin velas intradía para ${d.ticker} (los niveles sí se muestran).`);
   }
 
+  // ── Chart (TradingView · Lightweight Charts) ──────────────────────────────
+  // Velas intradia CONTINUAS (LWC secuencia las barras y comprime los huecos
+  // de noche/fin de semana, al contrario que un eje de fecha de Plotly) +
+  // perfil GEX por strike superpuesto a la derecha + niveles clave.
+  const _cht = { chart: null, series: null, canvas: null, ctx: null, lines: [], data: null, lastKey: null };
+
+  function _chtSize() {
+    const host = el("priceChart"); if (!host || !host._lwc) return;
+    const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
+    _cht.chart.resize(w, h);
+    const dpr = window.devicePixelRatio || 1;
+    _cht.canvas.width = w * dpr; _cht.canvas.height = h * dpr;
+    _cht.canvas.style.width = w + "px"; _cht.canvas.style.height = h + "px";
+    _cht.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function _chtDraw() {
+    const host = el("priceChart"); if (!host || !host._lwc || !_cht.data) return;
+    const w = host.clientWidth, h = host.clientHeight;
+    const ctx = _cht.ctx; ctx.clearRect(0, 0, w, h);
+    const gex = _cht.data.gex || [], strikes = _cht.data.strikes || [];
+    if (!gex.length || !strikes.length) return;
+    const psW = _cht.chart.priceScale("right").width() || 0;
+    const rightEdge = w - psW - 2;
+    const maxBarW = Math.min(0.16 * (w - psW), 120);   // columna GEX estrecha
+    const maxAbs = Math.max.apply(null, gex.map(Math.abs)) || 1;
+    const step = strikes.length > 1 ? Math.abs(strikes[1] - strikes[0]) : 1;
+    for (let i = 0; i < strikes.length; i++) {
+      const yC = _cht.series.priceToCoordinate(strikes[i]);
+      if (yC == null) continue;
+      const yT = _cht.series.priceToCoordinate(strikes[i] + step / 2);
+      const yB = _cht.series.priceToCoordinate(strikes[i] - step / 2);
+      const bh = (yT != null && yB != null) ? Math.max(2, Math.abs(yB - yT) - 1) : 4;
+      const bw = (Math.abs(gex[i]) / maxAbs) * maxBarW;
+      ctx.fillStyle = gex[i] >= 0 ? "rgba(38,166,154,0.55)" : "rgba(239,83,80,0.55)";
+      ctx.fillRect(rightEdge - bw, yC - bh / 2, bw, bh);
+    }
+  }
+  function _chtLines(d) {
+    _cht.lines.forEach((l) => { try { _cht.series.removePriceLine(l); } catch (_) {} });
+    _cht.lines = [];
+    const L = d.levels || {};
+    const defs = [[L.call_wall, "#26a69a", "Call Wall"], [L.put_wall, "#ef5350", "Put Wall"], [L.gamma_flip, "#a855f7", "γ Flip"]];
+    for (const [price, color, title] of defs) {
+      if (price == null || !isFinite(price)) continue;
+      _cht.lines.push(_cht.series.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title }));
+    }
+  }
+  function renderChartLWC(d) {
+    const host = el("priceChart");
+    const first = !host._lwc;
+    if (first) {
+      host.innerHTML = ""; host.style.position = "relative";
+      const canvas = document.createElement("canvas");
+      canvas.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;";
+      host.appendChild(canvas);
+      const chart = LightweightCharts.createChart(host, _lvlOpts());
+      const series = chart.addCandlestickSeries({
+        upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
+        wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      });
+      _cht.chart = chart; _cht.series = series; _cht.canvas = canvas; _cht.ctx = canvas.getContext("2d");
+      host._lwc = chart;
+      chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_chtDraw));
+      host.addEventListener("wheel", () => requestAnimationFrame(_chtDraw), { passive: true });
+      new ResizeObserver(() => { _chtSize(); requestAnimationFrame(_chtDraw); }).observe(host);
+    } else {
+      _cht.chart.applyOptions(_lvlOpts());
+    }
+    _cht.data = d;
+    const seen = new Set();
+    const candles = (d.bars || [])
+      .filter((b) => b.c != null)
+      .map((b) => ({ time: Math.floor(new Date(b.t).getTime() / 1000), open: b.o, high: b.h, low: b.l, close: b.c }))
+      .filter((c) => isFinite(c.time))
+      .sort((a, b) => a.time - b.time)
+      .filter((c) => { if (seen.has(c.time)) return false; seen.add(c.time); return true; });
+    _cht.series.setData(candles);
+    _chtSize();
+    const key = d.ticker + ":" + state.timeframe;
+    if (first || _cht.lastKey !== key) _cht.chart.timeScale().fitContent();
+    _cht.lastKey = key;
+    _chtLines(d);
+    requestAnimationFrame(_chtDraw);
+    if (!candles.length) setError(`Sin velas intradía para ${d.ticker}/${state.timeframe} (prueba otro timeframe o símbolo).`);
+  }
+
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
-    chart:   { plot: "priceChart", symbolic: true,  sub: () => state.timeframe,
+    chart:   { plot: "priceChart", symbolic: true,  engine: "lwc",  sub: () => state.timeframe,
                path: (s) => { const t = TF[state.timeframe] || TF["5m"];
                  return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
-               render: renderChart },
+               render: renderChartLWC },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
     spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=30&exp=10`, render: renderSpectrum },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
