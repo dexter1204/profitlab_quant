@@ -876,6 +876,177 @@
   }
 
   // ── view registry ──────────────────────────────────────────────────────────
+  // ── Volume Profile (TradingView · Lightweight Charts) ──────────────────────
+  // Non-Plotly view: candles + a volume-by-price histogram overlaid on a canvas,
+  // aligned to the price scale via series.priceToCoordinate. POC/VAH/VAL drawn
+  // as price lines. Idempotent: the chart is built once and reused on refresh.
+  const _vp = { chart: null, series: null, canvas: null, ctx: null, lines: [], data: null, lastSym: null };
+
+  function _cssVar(name, fb) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fb;
+  }
+  function _vpSize() {
+    const host = el("vpChart"); if (!host || !host._lwc) return;
+    const w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return;
+    _vp.chart.resize(w, h);
+    const dpr = window.devicePixelRatio || 1;
+    _vp.canvas.width = w * dpr; _vp.canvas.height = h * dpr;
+    _vp.canvas.style.width = w + "px"; _vp.canvas.style.height = h + "px";
+    _vp.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function _vpDraw() {
+    const host = el("vpChart"); if (!host || !host._lwc || !_vp.data) return;
+    const w = host.clientWidth, h = host.clientHeight;
+    const ctx = _vp.ctx; ctx.clearRect(0, 0, w, h);
+    const d = _vp.data;
+    const psW = _vp.chart.priceScale("right").width() || 0;
+    const rightEdge = w - psW - 2;
+    const maxBarW = Math.min(0.42 * (w - psW), 320);
+    const maxVol = Math.max.apply(null, d.volume) || 1;
+    const step = d.price.length > 1 ? Math.abs(d.price[1] - d.price[0]) : 1;
+    for (let i = 0; i < d.price.length; i++) {
+      const p = d.price[i];
+      const yC = _vp.series.priceToCoordinate(p);
+      if (yC == null) continue;
+      const yT = _vp.series.priceToCoordinate(p + step / 2);
+      const yB = _vp.series.priceToCoordinate(p - step / 2);
+      const bh = (yT != null && yB != null) ? Math.max(1, Math.abs(yB - yT) - 1) : 3;
+      const bw = (d.volume[i] / maxVol) * maxBarW;
+      const inVA = p >= d.val && p <= d.vah;
+      const isPOC = Math.abs(p - d.poc) <= step / 2;
+      ctx.fillStyle = isPOC ? "rgba(245,196,81,0.88)" : (inVA ? "rgba(59,130,246,0.45)" : "rgba(130,145,165,0.28)");
+      ctx.fillRect(rightEdge - bw, yC - bh / 2, bw, bh);
+    }
+  }
+  function _vpLines(d) {
+    _vp.lines.forEach((l) => { try { _vp.series.removePriceLine(l); } catch (_) {} });
+    _vp.lines = [];
+    const add = (price, color, title, solid) => _vp.lines.push(_vp.series.createPriceLine({
+      price, color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2,
+      axisLabelVisible: true, title,
+    }));
+    add(d.poc, "#f5c451", "POC", true);
+    add(d.vah, "#3b82f6", "VAH", false);
+    add(d.val, "#3b82f6", "VAL", false);
+  }
+  function _vpStats(d) {
+    const f = (x) => Number(x).toLocaleString("es", { maximumFractionDigits: 2 });
+    const s = el("vpStats");
+    if (s) s.innerHTML =
+      `<b>${d.ticker}</b> · POC <b>${f(d.poc)}</b> · Value Area <b>${f(d.val)}–${f(d.vah)}</b> (70%) · ` +
+      `rango <b>${f(d.low)}–${f(d.high)}</b> · ${d.bins} niveles`;
+  }
+  function renderVolumeProfile(d) {
+    const host = el("vpChart");
+    const firstBuild = !host._lwc;
+    if (firstBuild) {
+      host.innerHTML = ""; host.style.position = "relative";
+      const canvas = document.createElement("canvas");
+      canvas.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;";
+      host.appendChild(canvas);
+      const chart = LightweightCharts.createChart(host, {
+        layout: { background: { color: "transparent" }, textColor: _cssVar("--text-2", "#8b98a9") },
+        grid: { vertLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") }, horzLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") } },
+        rightPriceScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)") },
+        timeScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)"), timeVisible: true, secondsVisible: false },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      });
+      const series = chart.addCandlestickSeries({
+        upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
+        wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      });
+      _vp.chart = chart; _vp.series = series; _vp.canvas = canvas; _vp.ctx = canvas.getContext("2d");
+      host._lwc = chart;
+      chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_vpDraw));
+      host.addEventListener("wheel", () => requestAnimationFrame(_vpDraw), { passive: true });
+      new ResizeObserver(() => { _vpSize(); requestAnimationFrame(_vpDraw); }).observe(host);
+    } else {
+      // re-apply theme colors (handles a light/dark flip between renders)
+      _vp.chart.applyOptions({
+        layout: { textColor: _cssVar("--text-2", "#8b98a9") },
+        grid: { vertLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") }, horzLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") } },
+        rightPriceScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)") },
+        timeScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)") },
+      });
+    }
+    _vp.data = d;
+    _vp.series.setData((d.candles || []).map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    _vpSize();
+    if (firstBuild || _vp.lastSym !== d.ticker) _vp.chart.timeScale().fitContent();  // no resetear el zoom en refresh
+    _vp.lastSym = d.ticker;
+    _vpLines(d);
+    _vpStats(d);
+    requestAnimationFrame(_vpDraw);
+  }
+
+  // ── Gamma/Delta Levels (TradingView · Lightweight Charts) ──────────────────
+  // Candles + the dealer gamma/delta levels drawn as horizontal price lines.
+  // Refreshes with the dashboard's 30s auto-refresh → niveles "en vivo".
+  const _lvl = { chart: null, series: null, lines: [], lastSym: null };
+
+  function _lvlOpts() {
+    return {
+      layout: { background: { color: "transparent" }, textColor: _cssVar("--text-2", "#8b98a9") },
+      grid: { vertLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") }, horzLines: { color: _cssVar("--grid", "rgba(128,128,128,.1)") } },
+      rightPriceScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)") },
+      timeScale: { borderColor: _cssVar("--border", "rgba(128,128,128,.2)"), timeVisible: true, secondsVisible: false },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    };
+  }
+  function _lvlLines(d) {
+    _lvl.lines.forEach((l) => { try { _lvl.series.removePriceLine(l); } catch (_) {} });
+    _lvl.lines = [];
+    const L = d.levels || {};
+    const defs = [
+      [L.call_wall, "#26a69a", "Call Wall", true],
+      [L.put_wall, "#ef5350", "Put Wall", true],
+      [L.gamma_flip, "#a855f7", "γ Flip", true],
+      [L.delta_wall, "#f59e0b", "Δ Wall", true],
+      [L.major_neg_delta, "#3b82f6", "Δ− mayor", false],
+      [L.max_pain, "#8b98a9", "Max Pain", false],
+    ];
+    for (const [price, color, title, solid] of defs) {
+      if (price == null || !isFinite(price)) continue;
+      _lvl.lines.push(_lvl.series.createPriceLine({
+        price, color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2,
+        axisLabelVisible: true, title,
+      }));
+    }
+  }
+  function renderLevels(d) {
+    const host = el("lvlChart");
+    const first = !host._lwc;
+    if (first) {
+      host.innerHTML = ""; host.style.position = "relative";
+      const chart = LightweightCharts.createChart(host, _lvlOpts());
+      const series = chart.addCandlestickSeries({
+        upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
+        wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      });
+      _lvl.chart = chart; _lvl.series = series; host._lwc = chart;
+      new ResizeObserver(() => { const w = host.clientWidth, h = host.clientHeight; if (w && h) chart.resize(w, h); }).observe(host);
+    } else {
+      _lvl.chart.applyOptions(_lvlOpts());
+    }
+    const candles = (d.candles || [])
+      .filter((c) => c.close != null && isFinite(c.time))
+      .map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+    _lvl.series.setData(candles);
+    const w = host.clientWidth, h = host.clientHeight; if (w && h) _lvl.chart.resize(w, h);
+    if (first || _lvl.lastSym !== d.ticker) _lvl.chart.timeScale().fitContent();
+    _lvl.lastSym = d.ticker;
+    _lvlLines(d);
+    const s = el("lvlStats");
+    const f = (x) => (x == null || !isFinite(x)) ? "—" : Number(x).toLocaleString("es", { maximumFractionDigits: 2 });
+    const L = d.levels || {};
+    if (s) s.innerHTML =
+      `<b>${d.ticker}</b> · spot <b>${f(d.spot)}</b> · Call Wall <b>${f(L.call_wall)}</b> · ` +
+      `Put Wall <b>${f(L.put_wall)}</b> · γ Flip <b>${f(L.gamma_flip)}</b> · Δ Wall <b>${f(L.delta_wall)}</b>`;
+    if (!candles.length) setError(`Sin velas intradía para ${d.ticker} (los niveles sí se muestran).`);
+  }
+
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
     chart:   { plot: "priceChart", symbolic: true,  sub: () => state.timeframe,
@@ -890,6 +1061,8 @@
                path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
     drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
     voldrift:{ plot: "volDrift",   symbolic: true,  path: (s) => `/api/volatility_drift/${s}`,   render: renderVolatilityDrift },
+    vp:      { plot: "vpChart",    symbolic: true,  engine: "lwc",  path: (s) => `/api/volume_profile/${s}?bins=48`, render: renderVolumeProfile },
+    levels:  { plot: "lvlChart",   symbolic: true,  engine: "lwc",  path: (s) => `/api/levels_chart/${s}?window=24`, render: renderLevels },
     vol:     { plot: "volChart",   symbolic: true,  sub: () => state.volMode,
                path: (s) => state.volMode === "surface" ? `/api/vol_surface/${s}` : `/api/vol_drift/${s}`,
                render: (d) => state.volMode === "surface" ? renderVolSurface(d) : renderVolDrift(d) },
@@ -903,7 +1076,8 @@
     const key = `${view}:${sym}:${sub}`;
     if (!force && state.loaded.has(key)) return;
     setError("");
-    const hadPlot = !!(plotEl && plotEl.data);   // Plotly stores .data on the div
+    const isLWC = def.engine === "lwc";           // Lightweight Charts view (not Plotly)
+    const hadPlot = isLWC ? !!plotEl._lwc : !!(plotEl && plotEl.data);   // Plotly stores .data on the div
     // On a cold start (Render free tier) the first request can take ~30-50s.
     // Show a reassuring message after a few seconds so it doesn't look hung.
     let slowTimer = null;
@@ -918,13 +1092,12 @@
       const data = await fetchJSON(def.path(state.symbol));
       if (slowTimer) clearTimeout(slowTimer);
       // purge any existing plot so 3-D (WebGL) views re-render cleanly
-      if (hadPlot) { try { Plotly.purge(plotEl); } catch (_) {} }
+      if (hadPlot && !isLWC) { try { Plotly.purge(plotEl); } catch (_) {} }
       def.render(data);
       state.loaded.add(key);
     } catch (e) {
       if (slowTimer) clearTimeout(slowTimer);
-      try { Plotly.purge(plotEl); } catch (_) {}
-      plotEl.innerHTML = "";
+      if (!isLWC) { try { Plotly.purge(plotEl); } catch (_) {} plotEl.innerHTML = ""; }
       const label = def.symbolic ? ` de ${state.symbol}` : "";
       setError(`No se pudieron cargar los datos${label}: ${e.message}`);
     }
@@ -964,24 +1137,27 @@
     let open = false, items = [], active = -1;
 
     function build(filter) {
-      const f = (filter || "").trim().toUpperCase();
+      const f = (filter || "").trim();
       panel.innerHTML = ""; items = []; active = -1;
       for (const [label, syms] of GROUPS) {
-        const matched = syms.filter((s) =>
-          !f || s.includes(f) || (U.isFutures(s) && U.FUTURES_MAP[s].includes(f)));
+        // Un futuro coincide por su símbolo O por su subyacente (ES → SPX).
+        const cands = syms.map((s) => U.isFutures(s) ? { label: s, alias: U.FUTURES_MAP[s] } : s);
+        const matched = PLSearch.rank(f, cands);   // ranking + fuzzy + resaltado
         if (!matched.length) continue;
         const g = document.createElement("div"); g.className = "combo-group"; g.textContent = label;
         panel.appendChild(g);
-        for (const s of matched) {
+        for (const m of matched) {
+          const s = m.label;
           const o = document.createElement("div"); o.className = "combo-opt"; o.dataset.sym = s;
-          o.innerHTML = `<span>${s}</span>` + (U.isFutures(s) ? `<span class="mapto">→ ${U.FUTURES_MAP[s]}</span>` : "");
+          o.innerHTML = `<span>${PLSearch.highlight(s, m.hits)}</span>` +
+            (U.isFutures(s) ? `<span class="mapto">→ ${U.FUTURES_MAP[s]}</span>` : "");
           o.addEventListener("mousedown", (e) => { e.preventDefault(); choose(s); });
           panel.appendChild(o); items.push(o);
         }
       }
       if (!items.length) {
         const e = document.createElement("div"); e.className = "combo-empty";
-        e.textContent = f ? `Pulsa Enter para cargar “${f}”` : "Sin resultados";
+        e.textContent = f ? `Pulsa Enter para cargar “${f.toUpperCase()}”` : "Sin resultados";
         panel.appendChild(e);
       }
     }

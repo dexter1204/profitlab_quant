@@ -36,6 +36,7 @@ from fastapi import Depends  # noqa: E402
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
 from profitlab import dataquality  # noqa: E402
+from profitlab import volume_profile as vpmod  # noqa: E402
 
 from .aula import require_access  # noqa: E402  — access via the Aula Virtual
 
@@ -621,6 +622,81 @@ def net_drift(ticker: str):
 
     try:
         return _cached(f"drift:{ticker}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/volume_profile/{ticker}", dependencies=GATED)
+def volume_profile(ticker: str, bins: int = Query(48, ge=10, le=160)):
+    """Volume Profile (volumen por precio) de la última sesión intradía
+    (08:00–15:00). Reparte el volumen de cada barra entre los niveles de precio
+    que abarcó y devuelve el histograma + POC / VAH / VAL, junto con las velas
+    para dibujar precio y perfil en el mismo gráfico (TradingView)."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        bars = _session_bars(ticker)
+        if bars is None or not len(bars):
+            raise RuntimeError("Sin barras intradía para este símbolo/plan.")
+        vol = pd.to_numeric(bars.get("volume", 0.0), errors="coerce").fillna(0.0)
+        vp = vpmod.compute(
+            bars["high"].to_numpy(dtype=float),
+            bars["low"].to_numpy(dtype=float),
+            bars["close"].to_numpy(dtype=float),
+            vol.to_numpy(dtype=float),
+            bins=bins,
+        )
+        vp["ticker"] = ticker
+        vp["spot"] = _clean(pdata.spot(ticker))
+        # Velas con timestamp UNIX (segundos) — lo que Lightweight Charts espera
+        # para intradía.
+        vp["candles"] = [
+            {
+                "time": int(pd.Timestamp(r.ts).timestamp()),
+                "open": _clean(r.open), "high": _clean(r.high),
+                "low": _clean(r.low), "close": _clean(r.close),
+            }
+            for r in bars.itertuples()
+        ]
+        return vp
+
+    try:
+        return _cached(f"vp:{ticker}:{bins}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/levels_chart/{ticker}", dependencies=GATED)
+def levels_chart(ticker: str, window: int = Query(24, ge=5, le=60)):
+    """Velas intradía (08:00–15:00) + niveles gamma/delta (call wall, put wall,
+    gamma flip, delta wall, major neg delta, max pain) para dibujarlos como
+    líneas horizontales sobre el gráfico (TradingView). Se refresca con el
+    auto-refresh del dashboard → niveles "en vivo"."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        payload = _gamma_payload(ticker, window)
+        bars = _session_bars(ticker)
+        candles = []
+        if bars is not None and len(bars):
+            candles = [
+                {
+                    "time": int(pd.Timestamp(r.ts).timestamp()),
+                    "open": _clean(r.open), "high": _clean(r.high),
+                    "low": _clean(r.low), "close": _clean(r.close),
+                }
+                for r in bars.itertuples()
+            ]
+        return {
+            "ticker": ticker,
+            "spot": payload.get("spot"),
+            "levels": payload.get("levels", {}),
+            "regime": payload.get("regime", {}),
+            "candles": candles,
+        }
+
+    try:
+        return _cached(f"levels_chart:{ticker}:{window}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

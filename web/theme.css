@@ -239,11 +239,11 @@ select { appearance: none; -webkit-appearance: none; cursor: pointer; padding-ri
 }
 
 /* ── Tabs (pill nav) ─────────────────────────────────────────────────────── */
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 5px; flex-wrap: nowrap; }
 .tab {
   appearance: none; cursor: pointer; background: transparent; border: 1px solid transparent;
-  color: var(--text-2); font-family: inherit; font-size: 13.5px; font-weight: 550; letter-spacing: -0.01em;
-  padding: 9px 15px; border-radius: var(--r-pill); white-space: nowrap;
+  color: var(--text-2); font-family: inherit; font-size: 12.5px; font-weight: 550; letter-spacing: -0.01em;
+  padding: 8px 10px; border-radius: var(--r-pill); white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .tab:hover { color: var(--text); background: var(--surface-2); }

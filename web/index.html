@@ -8,19 +8,22 @@
 <link rel="stylesheet" href="theme.css" />
 <script src="plotly.min.js"></script>
 <style>
-  :root { --gutter: 40px; --appbar-h: 46px; --subbar-h: 56px; }
+  :root { --gutter: 40px; --appbar-h: 60px; --subbar-h: 56px; }
 
-  /* ── App bar (translucent chrome) — delgada y compacta ── */
+  /* ── App bar (translucent chrome) — con aire (Apple) ── */
   .appbar { position: sticky; top: 0; z-index: 40; }
-  .appbar .row { display: flex; align-items: center; gap: 12px; height: var(--appbar-h); }
+  .appbar .row { display: flex; align-items: center; gap: 18px; height: var(--appbar-h); }
   .appbar .brand { font-size: 16px; }
-  .appbar .tagpill { padding: 2px 9px; font-size: 9px; }
-  /* Controles más bajos para que quepan en una barra fina */
-  .appbar .btn { min-height: 30px; padding: 0 12px; font-size: 12.5px; border-radius: 8px; }
-  .appbar .theme-toggle { width: 32px; height: 32px; }
+  .appbar .tagpill { padding: 3px 10px; font-size: 9px; }
+  .appbar .btn { min-height: 34px; padding: 0 14px; font-size: 12.5px; border-radius: 9px; }
+  .appbar .theme-toggle { width: 34px; height: 34px; }
   .appbar .theme-toggle svg { width: 16px; height: 16px; }
-  .appbar .live { padding: 3px 10px; font-size: 10px; }
+  /* icono (punto) separado del texto "Live" */
+  .appbar .live { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; font-size: 10px; }
   .appbar .live .dot { width: 6px; height: 6px; }
+  /* la cuenta y los controles de la derecha, agrupados con su propio aire */
+  .appbar .acct { margin-left: 4px; }
+  .appbar .tickrow { gap: 12px; }
   .grow { flex: 1; }
   .acct { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
   .acct b { color: var(--text); font-size: 12.5px; font-weight: 600; }
@@ -29,9 +32,9 @@
 
   /* ── Sub-bar: ticker + tabs ── */
   .subbar { position: sticky; top: var(--appbar-h); z-index: 30; }
-  .subbar .row { display: flex; align-items: center; gap: 22px; padding: 12px 0; flex-wrap: wrap; }
-  .tickrow { display: flex; align-items: center; gap: 14px; }
-  .selector { position: relative; width: 300px; }
+  .subbar .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: nowrap; }
+  .tickrow { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+  .selector { position: relative; width: 200px; }
   .selector input { padding-right: 38px; font-weight: 600; text-transform: uppercase; }
   .selector input::placeholder { text-transform: none; font-weight: 400; }
   .selector .chev { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
@@ -51,12 +54,47 @@
     padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 550; color: var(--text); }
   .combo-opt:hover, .combo-opt.active { background: var(--surface-2); }
   .combo-opt .mapto { color: var(--text-3); font-size: 11px; font-weight: 500; }
+  .combo-opt mark { background: transparent; color: var(--accent-text); font-weight: 800; padding: 0; }
   .combo-empty { padding: 10px; color: var(--text-2); font-size: 13px; }
+  .vp-legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--text-2); align-items: center; }
+  .vp-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .vp-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   .assetname { font-size: 14px; color: var(--text-2); white-space: nowrap; }
   .assetname b { color: var(--text); font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
-  .tabs { flex: 1; justify-content: flex-end; }
+  /* Una sola fila: se ancla a la derecha y, si algún ancho no diera, hace
+     scroll horizontal (nunca envuelve ni recorta). */
+  .tabs { flex: 0 1 auto; min-width: 0; margin-left: auto; justify-content: flex-start;
+    overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  /* Solo en móvil real vuelve a envolver, que ahí el scroll de tabs molesta */
+  @media (max-width: 760px) {
+    .subbar .row { flex-wrap: wrap; }
+    .tabs { flex: 1 1 100%; margin-left: 0; overflow-x: visible; flex-wrap: wrap; }
+  }
 
   .page { padding-top: var(--s4); padding-bottom: var(--s6); }
+
+  /* ── Layout con rail lateral vertical ── */
+  .appbar .wrap { max-width: none; padding-left: 16px; padding-right: 22px; }  /* barra superior a todo el ancho */
+  .shell { display: flex; align-items: stretch; }
+  .siderail { position: sticky; top: var(--appbar-h); align-self: flex-start;
+    flex: 0 0 212px; width: 212px; display: flex; flex-direction: column; gap: 3px;
+    padding: 14px 10px; border-right: 1px solid var(--border);
+    height: calc(100vh - var(--appbar-h)); overflow-y: auto; }
+  .siderail .tab { width: 100%; justify-content: flex-start; text-align: left;
+    padding: 9px 14px; font-size: 13px; border-radius: 10px; }
+  .content { flex: 1 1 auto; min-width: 0; width: 100%; max-width: 1640px; margin-inline: auto;
+    padding: 22px 30px 56px; }
+  /* En pantallas estrechas el rail pasa a barra superior con scroll horizontal */
+  @media (max-width: 860px) {
+    .shell { flex-direction: column; }
+    .siderail { position: static; flex-direction: row; width: auto; flex: none;
+      height: auto; overflow-x: auto; overflow-y: hidden; gap: 4px; padding: 8px 12px;
+      border-right: 0; border-bottom: 1px solid var(--border); }
+    .siderail .tab { width: auto; }
+    .content { padding: 14px 16px 40px; }
+    .appbar .tagpill, .appbar .assetname { display: none; }
+  }
 
   /* ── Metric ribbon ── */
   .ribbon { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 14px; margin-bottom: var(--s4); }
@@ -186,15 +224,6 @@
   <header class="appbar material"><div class="wrap row">
     <div class="brand">Profit<span>Lab</span> Quant</div>
     <span class="tagpill">Escritorio</span>
-    <span class="grow"></span>
-    <span class="live" id="statusBadge"><span class="dot"></span><span class="txt">Live</span></span>
-    <span class="acct" id="acctInfo"></span>
-    <button id="themeToggle"></button>
-    <a class="btn admin" id="adminLink" href="#" rel="noopener" style="display:none">Gestionar alumnos</a>
-    <button class="btn ghost" id="logoutBtn">Salir</button>
-  </div></header>
-
-  <div class="subbar material"><div class="wrap row">
     <div class="tickrow">
       <div class="selector" id="tickerCombo">
         <input id="ticker" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false"
@@ -204,7 +233,16 @@
       </div>
       <span class="assetname"><b id="tkName">QQQ</b></span>
     </div>
-    <nav class="tabs" id="tabs">
+    <span class="grow"></span>
+    <span class="live" id="statusBadge"><span class="dot"></span><span class="txt">Live</span></span>
+    <span class="acct" id="acctInfo"></span>
+    <button id="themeToggle"></button>
+    <a class="btn admin" id="adminLink" href="#" rel="noopener" style="display:none">Gestionar alumnos</a>
+    <button class="btn ghost" id="logoutBtn">Salir</button>
+  </div></header>
+
+  <div class="shell">
+    <aside class="siderail" id="tabs">
       <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
       <button class="tab" data-view="chart">Chart</button>
       <button class="tab" data-view="gexheat">GEX Heatmap</button>
@@ -214,11 +252,12 @@
       <button class="tab" data-view="dsurf">Delta Surface</button>
       <button class="tab" data-view="drift">Net Drift</button>
       <button class="tab" data-view="voldrift">Volatility Drift</button>
+      <button class="tab" data-view="levels">Niveles γ/Δ</button>
+      <button class="tab" data-view="vp">Volume Profile</button>
       <button class="tab" data-view="vol">Volatility</button>
-    </nav>
-  </div></div>
+    </aside>
 
-  <main class="wrap page">
+    <main class="content" id="content">
   <div id="err"></div>
 
   <!-- ── Panel de referencia (Call/Put walls + key levels) — bajo el buscador ── -->
@@ -330,6 +369,32 @@
     <div class="panel"><div id="volDrift" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
 
+  <!-- ── NIVELES GAMMA/DELTA (TradingView · Lightweight Charts) ── -->
+  <section id="view-levels" class="view hidden">
+    <div class="toolbar">
+      <span class="hint" id="lvlStats">Precio intradía con los niveles dealer γ/Δ · Call/Put Wall, Gamma Flip, Delta Wall · se refrescan cada 30s</span>
+      <span class="vp-legend">
+        <span><i class="vp-dot" style="background:#26a69a"></i>Call Wall</span>
+        <span><i class="vp-dot" style="background:#ef5350"></i>Put Wall</span>
+        <span><i class="vp-dot" style="background:#a855f7"></i>γ Flip</span>
+        <span><i class="vp-dot" style="background:#f59e0b"></i>Δ Wall</span>
+      </span>
+    </div>
+    <div class="panel"><div id="lvlChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
+  <!-- ── VOLUME PROFILE (TradingView · Lightweight Charts) ── -->
+  <section id="view-vp" class="view hidden">
+    <div class="toolbar">
+      <span class="hint" id="vpStats">Volumen negociado por nivel de precio (sesión intradía) · POC = precio más negociado · Value Area 70%</span>
+      <span class="vp-legend">
+        <span><i class="vp-dot" style="background:#f5c451"></i>POC</span>
+        <span><i class="vp-dot" style="background:#3b82f6;opacity:.55"></i>Value Area</span>
+      </span>
+    </div>
+    <div class="panel"><div id="vpChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+  </section>
+
   <!-- ── VOLATILITY ── -->
   <section id="view-vol" class="view hidden">
     <div class="toolbar">
@@ -346,10 +411,13 @@
     <div class="panel"><div id="volChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
   </section>
   </main>
+  </div><!-- /.shell -->
 
   <script src="config.js"></script>
   <script src="auth.js"></script>
   <script src="universe.js"></script>
+  <script src="search.js"></script>
+  <script src="lightweight-charts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

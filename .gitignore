@@ -25,3 +25,11 @@ node_modules/
 .agents/
 .claude/
 skills-lock.json
+
+# Instaladores / binarios propietarios de terceros (NO versionar ni distribuir)
+*.exe
+Quantower.exe
+
+# Capturas sueltas de trabajo
+drift.png
+drift rayado.png
