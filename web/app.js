@@ -149,8 +149,8 @@
     const L = d.levels || {}, spot = d.spot;
     const pairs = (d.strikes || []).map((k, i) => ({ k: Number(k), v: Number((d.gex || [])[i]) || 0 }))
       .filter((p) => isFinite(p.k));
-    const calls = pairs.filter((p) => p.v > 0).sort((a, b) => b.v - a.v).slice(0, 3);
-    const puts = pairs.filter((p) => p.v < 0).sort((a, b) => a.v - b.v).slice(0, 3);
+    const calls = pairs.filter((p) => p.v > 0).sort((a, b) => b.v - a.v).slice(0, 6);
+    const puts = pairs.filter((p) => p.v < 0).sort((a, b) => a.v - b.v).slice(0, 6);
 
     const pct = (lvl) => (lvl == null || spot == null || !isFinite(lvl) || !spot) ? null : ((lvl - spot) / spot) * 100;
     const pctTag = (lvl) => {
@@ -158,29 +158,31 @@
       const cls = p >= 0 ? "pos" : "neg";
       return `<span class="rtag ${cls}">${p >= 0 ? "+" : ""}${p.toFixed(2)}%</span>`;
     };
-    const wall = (arr, cls) => arr.length
+    const wallRows = (arr, cls) => arr.length
       ? arr.map((p) => `<div class="refrow"><span class="rk">$${fmtLevel(p.k)}</span><span class="rv ${cls}">${fmtBig(Math.abs(p.v))}</span></div>`).join("")
       : `<div class="refrow"><span class="rlbl">—</span></div>`;
 
     const flipTag = (spot != null && L.gamma_flip != null && isFinite(L.gamma_flip))
       ? `<span class="rtag ${spot < L.gamma_flip ? "neg" : "pos"}">${spot < L.gamma_flip ? "Below" : "Above"}</span>`
       : "";
-    // Cinta horizontal en movimiento: cada nivel es un "chip". El track se
-    // duplica para que el marquee (translateX -50%) sea un bucle sin costuras.
-    const chip = (cls, lbl, val, tag) =>
-      `<div class="refchip ${cls}"><span class="rc-dot"></span><span class="rc-lbl">${lbl}</span><span class="rc-val">${val}</span>${tag || ""}</div>`;
-    const chips = [];
-    calls.forEach((p) => chips.push(chip("call", "Call Wall", "$" + fmtLevel(p.k))));
-    puts.forEach((p) => chips.push(chip("put", "Put Wall", "$" + fmtLevel(p.k))));
-    const addKey = (lbl, v, tag) => { if (v != null && isFinite(v)) chips.push(chip("key", lbl, "$" + fmtLevel(v), tag)); };
-    addKey("Gamma Flip", L.gamma_flip, flipTag);
-    addKey("Vol Trigger", L.gamma_flip, pctTag(L.gamma_flip));
-    addKey("Max Pain", L.max_pain, pctTag(L.max_pain));
-    addKey("Delta Wall", L.delta_wall, pctTag(L.delta_wall));
-    addKey("Major Neg Δ", L.major_neg_delta, pctTag(L.major_neg_delta));
+    const keyRows = [
+      ["Gamma Flip", L.gamma_flip, flipTag],
+      ["Vol Trigger", L.gamma_flip, pctTag(L.gamma_flip)],
+      ["Max Pain", L.max_pain, pctTag(L.max_pain)],
+      ["Delta Wall", L.delta_wall, pctTag(L.delta_wall)],
+      ["Major Neg Δ", L.major_neg_delta, pctTag(L.major_neg_delta)],
+    ].map(([lbl, v, tag]) => `<div class="refrow"><span class="rlbl">${lbl}</span>
+        <span class="rk">${v == null || !isFinite(v) ? "—" : "$" + fmtLevel(v)}${tag ? " " + tag : ""}</span></div>`).join("");
 
-    const track = chips.length ? chips.join("") : `<div class="refchip"><span class="rc-lbl">Sin niveles disponibles</span></div>`;
-    box.innerHTML = `<div class="refstrip"><div class="refstrip-track">${track}${track}</div></div>`;
+    // 3 columnas; cada una con sus filas desplazándose en vertical. El track se
+    // duplica para que el marquee (translateY -50%) sea un bucle sin costuras.
+    const col = (dotCls, title, rows) =>
+      `<div class="refcol"><div class="rx"><span class="dot ${dotCls}"></span>${title}</div>
+        <div class="refscroll"><div class="refscroll-track">${rows}${rows}</div></div></div>`;
+    box.innerHTML =
+      col("call", "Call Walls", wallRows(calls, "call")) +
+      col("put", "Put Walls", wallRows(puts, "put")) +
+      col("key", "Key Levels", keyRows);
   }
 
   // Fetch /analyze for the reference bar with a WIDE strike window so the top

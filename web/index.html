@@ -208,25 +208,21 @@
   /* View transition — cross-fade/rise on tab change */
   .view { animation: rise var(--dur) var(--spring) both; }
 
-  /* ── Reference bar (Call/Put walls + key levels) under the buscador ── */
-  /* ── Reference bar: cinta de niveles en movimiento (marquee) ── */
-  .refbar { margin-bottom: var(--s4); }
-  .refstrip { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm);
-    background: var(--surface); box-shadow: var(--shadow-sm);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent); }
-  .refstrip-track { display: flex; width: max-content; animation: marquee 55s linear infinite; }
-  .refstrip:hover .refstrip-track { animation-play-state: paused; }
-  .refchip { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px;
-    white-space: nowrap; border-right: 1px solid var(--border-2); }
-  .refchip .rc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-text); flex: 0 0 auto; }
-  .refchip.call .rc-dot { background: var(--green); } .refchip.put .rc-dot { background: var(--red); }
-  .refchip .rc-lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); font-weight: 650; }
-  .refchip .rc-val { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-  .refchip.call .rc-val { color: var(--green); } .refchip.put .rc-val { color: var(--red); }
+  /* ── Reference bar: 3 columnas (Call/Put walls + key levels) con las filas
+     desplazándose en vertical (marquee), pausa al hover ── */
+  .refbar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--border-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+    overflow: hidden; margin-bottom: var(--s4); box-shadow: var(--shadow-sm); }
+  @media (max-width: 760px) { .refbar { grid-template-columns: 1fr; } }
+  .refscroll { height: 76px; overflow: hidden; position: relative;
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent);
+    mask-image: linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent); }
+  .refscroll-track { display: flex; flex-direction: column; gap: 3px; animation: vmarquee 16s linear infinite; }
+  .refcol:hover .refscroll-track { animation-play-state: paused; }
+  @keyframes vmarquee { from { transform: translateY(0); } to { transform: translateY(-50%); } }
   @media (prefers-reduced-motion: reduce) {
-    .refstrip-track { animation: none; }
-    .refstrip { overflow-x: auto; -webkit-mask-image: none; mask-image: none; }
+    .refscroll-track { animation: none; }
+    .refscroll { overflow-y: auto; }
   }
   .refcol { background: var(--surface); padding: 9px 13px; min-width: 0; }
   .refcol .rx { display: flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 650;
