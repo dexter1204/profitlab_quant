@@ -86,4 +86,7 @@ def test_cell_color_diverges_around_zero():
     red = components._cell_color(-0.05)
     black = components._cell_color(0.0)
     assert green.startswith("rgb(") and red.startswith("rgb(")
-    assert black == "rgb(11,18,32)"  # dark base
+    # El base neutro (pct=0) es el fondo de panel del tema; se deriva de
+    # S.BG_PANEL para no romperse si el rediseño cambia el color.
+    base = components._hex_to_rgb(components.S.BG_PANEL)
+    assert black == "rgb({},{},{})".format(*base)
