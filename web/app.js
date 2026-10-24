@@ -165,19 +165,22 @@
     const flipTag = (spot != null && L.gamma_flip != null && isFinite(L.gamma_flip))
       ? `<span class="rtag ${spot < L.gamma_flip ? "neg" : "pos"}">${spot < L.gamma_flip ? "Below" : "Above"}</span>`
       : "";
-    const keyRows = [
-      ["Gamma Flip", L.gamma_flip, flipTag],
-      ["Vol Trigger", L.gamma_flip, pctTag(L.gamma_flip)],
-      ["Max Pain", L.max_pain, pctTag(L.max_pain)],
-      ["Delta Wall", L.delta_wall, pctTag(L.delta_wall)],
-      ["Major Neg Δ", L.major_neg_delta, pctTag(L.major_neg_delta)],
-    ].map(([lbl, v, tag]) => `<div class="refkey"><span class="kk">${lbl}</span>
-        <span class="kv">${v == null || !isFinite(v) ? "—" : "$" + fmtLevel(v)}${tag}</span></div>`).join("");
+    // Cinta horizontal en movimiento: cada nivel es un "chip". El track se
+    // duplica para que el marquee (translateX -50%) sea un bucle sin costuras.
+    const chip = (cls, lbl, val, tag) =>
+      `<div class="refchip ${cls}"><span class="rc-dot"></span><span class="rc-lbl">${lbl}</span><span class="rc-val">${val}</span>${tag || ""}</div>`;
+    const chips = [];
+    calls.forEach((p) => chips.push(chip("call", "Call Wall", "$" + fmtLevel(p.k))));
+    puts.forEach((p) => chips.push(chip("put", "Put Wall", "$" + fmtLevel(p.k))));
+    const addKey = (lbl, v, tag) => { if (v != null && isFinite(v)) chips.push(chip("key", lbl, "$" + fmtLevel(v), tag)); };
+    addKey("Gamma Flip", L.gamma_flip, flipTag);
+    addKey("Vol Trigger", L.gamma_flip, pctTag(L.gamma_flip));
+    addKey("Max Pain", L.max_pain, pctTag(L.max_pain));
+    addKey("Delta Wall", L.delta_wall, pctTag(L.delta_wall));
+    addKey("Major Neg Δ", L.major_neg_delta, pctTag(L.major_neg_delta));
 
-    box.innerHTML = `
-      <div class="refcol"><div class="rx"><span class="dot call"></span>Call Walls</div>${wall(calls, "call")}</div>
-      <div class="refcol"><div class="rx"><span class="dot put"></span>Put Walls</div>${wall(puts, "put")}</div>
-      <div class="refcol"><div class="rx"><span class="dot key"></span>Key Levels</div><div class="refkeys">${keyRows}</div></div>`;
+    const track = chips.length ? chips.join("") : `<div class="refchip"><span class="rc-lbl">Sin niveles disponibles</span></div>`;
+    box.innerHTML = `<div class="refstrip"><div class="refstrip-track">${track}${track}</div></div>`;
   }
 
   // Fetch /analyze for the reference bar with a WIDE strike window so the top

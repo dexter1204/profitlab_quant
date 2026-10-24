@@ -10,6 +10,25 @@
 <style>
   :root { --gutter: 40px; --appbar-h: 60px; --subbar-h: 56px; }
 
+  /* ── Fondo con movimiento sutil (aurora) + profundidad ── */
+  body { position: relative; }
+  body::before {
+    content: ""; position: fixed; inset: -20vmax; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(38vmax 30vmax at 18% 8%,  color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
+      radial-gradient(34vmax 30vmax at 88% 92%, color-mix(in srgb, #5b8cff 22%, transparent), transparent 60%),
+      radial-gradient(30vmax 26vmax at 72% 18%, color-mix(in srgb, #a855f7 16%, transparent), transparent 60%);
+    opacity: .45; animation: aurora 26s ease-in-out infinite alternate; will-change: transform;
+  }
+  @keyframes aurora {
+    0%   { transform: translate3d(-3%, -2%, 0) scale(1.06) rotate(0deg); }
+    50%  { transform: translate3d(2%, 1%, 0)   scale(1.13) rotate(2deg); }
+    100% { transform: translate3d(3%, 3%, 0)   scale(1.08) rotate(-1.5deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
+  /* Profundidad moderna: borde-luz superior sutil + sombra en los paneles */
+  .panel { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 7%, transparent), var(--shadow-sm); }
+
   /* ── App bar (translucent chrome) — con aire (Apple) ── */
   .appbar { position: sticky; top: 0; z-index: 40; }
   .appbar .row { display: flex; align-items: center; gap: 18px; height: var(--appbar-h); }
@@ -190,10 +209,25 @@
   .view { animation: rise var(--dur) var(--spring) both; }
 
   /* ── Reference bar (Call/Put walls + key levels) under the buscador ── */
-  .refbar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
-    background: var(--border-2); border: 1px solid var(--border); border-radius: var(--r-sm);
-    overflow: hidden; margin-bottom: var(--s3); box-shadow: var(--shadow-sm); }
-  @media (max-width: 760px) { .refbar { grid-template-columns: 1fr; } }
+  /* ── Reference bar: cinta de niveles en movimiento (marquee) ── */
+  .refbar { margin-bottom: var(--s4); }
+  .refstrip { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface); box-shadow: var(--shadow-sm);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent); }
+  .refstrip-track { display: flex; width: max-content; animation: marquee 55s linear infinite; }
+  .refstrip:hover .refstrip-track { animation-play-state: paused; }
+  .refchip { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px;
+    white-space: nowrap; border-right: 1px solid var(--border-2); }
+  .refchip .rc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-text); flex: 0 0 auto; }
+  .refchip.call .rc-dot { background: var(--green); } .refchip.put .rc-dot { background: var(--red); }
+  .refchip .rc-lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); font-weight: 650; }
+  .refchip .rc-val { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .refchip.call .rc-val { color: var(--green); } .refchip.put .rc-val { color: var(--red); }
+  @media (prefers-reduced-motion: reduce) {
+    .refstrip-track { animation: none; }
+    .refstrip { overflow-x: auto; -webkit-mask-image: none; mask-image: none; }
+  }
   .refcol { background: var(--surface); padding: 9px 13px; min-width: 0; }
   .refcol .rx { display: flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 650;
     letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 5px; }
@@ -206,10 +240,10 @@
   .refrow .rv { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .refrow .rv.call { color: var(--green); } .refrow .rv.put { color: var(--red); }
   .refrow .rv.key { color: var(--text); }
-  .refrow .rtag { font-size: 10px; font-weight: 650; padding: 1px 6px; border-radius: var(--r-pill);
+  .refrow .rtag, .refchip .rtag { font-size: 10px; font-weight: 650; padding: 1px 6px; border-radius: var(--r-pill);
     background: var(--surface-3); color: var(--text-2); white-space: nowrap; }
-  .refrow .rtag.pos { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
-  .refrow .rtag.neg { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+  .refrow .rtag.pos, .refchip .rtag.pos { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+  .refrow .rtag.neg, .refchip .rtag.neg { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
   .refbar .loading { padding: 10px 13px; grid-column: 1 / -1; }
   /* Key Levels: 2-column grid of tiles */
   .refkeys { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 14px; }
