@@ -34,6 +34,48 @@ def test_polygon_requires_api_key():
             polygon_mod.spot("QQQ")
 
 
+class _FakeVendor:
+    """Stand-in vendor module that counts option_chain fetches."""
+    __name__ = "fake_vendor"
+
+    def __init__(self):
+        self.calls = 0
+
+    def option_chain(self, ticker, expiries=None, max_expiries=4):
+        self.calls += 1
+        return pd.DataFrame({"strike": [100.0, 105.0], "oi": [1.0, 2.0]})
+
+
+def _reset_chain_cache():
+    data._CHAIN_CACHE.clear()
+    data._CHAIN_FLIGHT.clear()
+
+
+def test_option_chain_cache_dedupes_within_ttl():
+    """A burst of same-ticker calls fetches the chain once (shared cache)."""
+    fake = _FakeVendor()
+    _reset_chain_cache()
+    with patch.object(data, "_vendor_module", return_value=fake), \
+         patch.dict(os.environ, {"PROFITLAB_CHAIN_TTL": "90"}):
+        a = data.option_chain("QQQ")
+        b = data.option_chain("QQQ")
+        assert fake.calls == 1          # second call served from cache
+        a.loc[0, "oi"] = 999.0          # mutating a copy must not poison cache
+        assert b.loc[0, "oi"] == 1.0
+    _reset_chain_cache()
+
+
+def test_option_chain_cache_disabled_with_zero_ttl():
+    fake = _FakeVendor()
+    _reset_chain_cache()
+    with patch.object(data, "_vendor_module", return_value=fake), \
+         patch.dict(os.environ, {"PROFITLAB_CHAIN_TTL": "0"}):
+        data.option_chain("QQQ")
+        data.option_chain("QQQ")
+        assert fake.calls == 2          # no caching
+    _reset_chain_cache()
+
+
 def test_polygon_normalizes_option_chain_snapshot():
     """The chain builder must convert Polygon's snapshot response into
     the [strike, expiry, type, oi, iv, bid, ask, last] schema used by

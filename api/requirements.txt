@@ -3,6 +3,7 @@
 numpy>=1.26
 pandas>=2.1
 requests>=2.31
+ijson>=3.2          # streaming JSON parse for GexBot hist/eod (avoids OOM)
 yfinance>=0.2.40
 fastapi>=0.110
 uvicorn[standard]>=0.29

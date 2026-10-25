@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import gzip
 import io
-import json
 import os
 import time
 import zipfile
 from typing import Optional
 
+import ijson
 import requests
 
 DEFAULT_BASE_URL = "https://api.gex.bot/v2"
@@ -164,6 +164,19 @@ def expiries(ticker: str) -> dict:
     return _get(f"/options/{ticker.upper().strip()}/expiries")
 
 
+def _num(v):
+    """Coerce a JSON number to a plain float. ijson yields ``decimal.Decimal``
+    for fractional numbers, which neither the stdlib json encoder nor our
+    downstream math accept — floats keep the payload serialisable. Ints
+    (e.g. epoch timestamps) and strings pass through untouched."""
+    if v is None or isinstance(v, (bool, int, str)):
+        return v
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return v
+
+
 def _zip_category(category: str) -> str:
     """Map a category alias to the `gex_full|gex_zero|gex_one` form used inside
     the hist/eod ZIP file paths and by the API routes."""
@@ -213,47 +226,41 @@ def hist_eod_series(ticker: str, category: str = "full",
     if name is None:
         raise RuntimeError(
             f"hist/eod de {t}: no hay grabación para la categoría {zcat}.")
-    with zf.open(name) as fh:
-        snaps = json.loads(gzip.decompress(fh.read()))
-    if not isinstance(snaps, list) or not snaps:
+
+    # Stream-parse the gzipped JSON array instead of materialising all ~16k
+    # snapshots at once. Each snapshot is a large dict (it carries the full
+    # `strikes` array), so json.loads() of the whole list spikes to hundreds of
+    # MB and OOM-kills the 512 MB dyno. ijson yields one element at a time; we
+    # keep only the 9 scalar fields, so peak memory stays a few MB.
+    light: list[dict] = []
+    with zf.open(name) as comp, gzip.GzipFile(fileobj=comp) as gz:
+        for s in ijson.items(gz, "item"):
+            if not isinstance(s, dict):
+                continue
+            light.append({
+                "t": _num(s.get("timestamp")),
+                "spot": _num(s.get("spot")),
+                "zero_gamma": _num(s.get("zero_gamma")),
+                "major_pos_oi": _num(s.get("major_pos_oi")),
+                "major_neg_oi": _num(s.get("major_neg_oi")),
+                "major_pos_vol": _num(s.get("major_pos_vol")),
+                "major_neg_vol": _num(s.get("major_neg_vol")),
+                "net_gex_oi": _num(s.get("sum_gex_oi")),
+                "net_gex_vol": _num(s.get("sum_gex_vol")),
+            })
+    if not light:
         raise RuntimeError(f"hist/eod de {t}: grabación vacía.")
 
     # Date from the filename (DATE_TICKER_classic_cat.json.gz).
     base = name.rsplit("/", 1)[-1]
     date = base.split("_", 1)[0]
 
-    n = len(snaps)
+    n = len(light)
     step = max(1, n // max(1, target_points))
-    points = []
-    for i in range(0, n, step):
-        s = snaps[i]
-        if not isinstance(s, dict):
-            continue
-        points.append({
-            "t": s.get("timestamp"),
-            "spot": s.get("spot"),
-            "zero_gamma": s.get("zero_gamma"),
-            "major_pos_oi": s.get("major_pos_oi"),
-            "major_neg_oi": s.get("major_neg_oi"),
-            "major_pos_vol": s.get("major_pos_vol"),
-            "major_neg_vol": s.get("major_neg_vol"),
-            "net_gex_oi": s.get("sum_gex_oi"),
-            "net_gex_vol": s.get("sum_gex_vol"),
-        })
+    points = light[::step]
     # Always include the very last snapshot (session close).
     if (n - 1) % step != 0:
-        s = snaps[-1]
-        if isinstance(s, dict):
-            points.append({
-                "t": s.get("timestamp"), "spot": s.get("spot"),
-                "zero_gamma": s.get("zero_gamma"),
-                "major_pos_oi": s.get("major_pos_oi"),
-                "major_neg_oi": s.get("major_neg_oi"),
-                "major_pos_vol": s.get("major_pos_vol"),
-                "major_neg_vol": s.get("major_neg_vol"),
-                "net_gex_oi": s.get("sum_gex_oi"),
-                "net_gex_vol": s.get("sum_gex_vol"),
-            })
+        points.append(light[-1])
     return {"ticker": t, "category": zcat, "date": date,
             "count_raw": n, "points": points}
 
