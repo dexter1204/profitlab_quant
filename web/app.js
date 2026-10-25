@@ -68,6 +68,7 @@
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
     surf3d: true,                  // surfaces: 3D (default) | 2D heatmap
+    gexTf: "5m",                   // Chart GexBot: temporalidad de las velas (interval)
     gexCategory: "full",           // Chart GexBot: agg | 0DTE | next
     gexCol: "gex",                 // Chart histograma lateral: gex | delta (priors)
     gexMetric: "oi",               // Chart GexBot perfil: oi | vol
@@ -1268,8 +1269,8 @@
 
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
-    chart:   { plot: "gexProfile", symbolic: true,  engine: "lwc", sub: () => state.gexCategory,
-               path: (s) => `/api/gexbot/${s}?category=${state.gexCategory}&interval=5m`, render: renderGexChart },
+    chart:   { plot: "gexProfile", symbolic: true,  engine: "lwc", sub: () => state.gexCategory + ":" + state.gexTf,
+               path: (s) => `/api/gexbot/${s}?category=${state.gexCategory}&interval=${state.gexTf}`, render: renderGexChart },
     replay:  { plot: "replayChart", symbolic: true, engine: "lwc", sub: () => state.rpCategory,
                path: (s) => `/api/gexbot/replay/${s}?category=${state.rpCategory}&points=600`, render: renderReplay },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
@@ -1483,6 +1484,7 @@
     };
     segReload("deltaKind", "kind", "deltaKind", "dsurf");
     segReload("volMode", "mode", "volMode", "vol");
+    segReload("gexTf", "tf", "gexTf", "chart");
     segReload("gexCategory", "gc", "gexCategory", "chart");
     segReload("rpCategory", "gc", "rpCategory", "replay");
 

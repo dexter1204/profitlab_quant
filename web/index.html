@@ -324,6 +324,12 @@
   <!-- ── CHART GexBot (A perfil + C dinámica priors) ── -->
   <section id="view-chart" class="view hidden">
     <div class="toolbar">
+      <div class="seg" id="gexTf" title="Temporalidad de las velas">
+        <button data-tf="1m">1m</button>
+        <button data-tf="5m" class="active">5m</button>
+        <button data-tf="15m">15m</button>
+        <button data-tf="1h">1h</button>
+      </div>
       <div class="seg" id="gexCategory">
         <button data-gc="full" class="active">agg</button>
         <button data-gc="zero">0DTE</button>
@@ -337,12 +343,12 @@
         <button data-gm="oi" class="active">OI</button>
         <button data-gm="vol">Vol</button>
       </div>
-      <div class="seg hidden" id="gexLookback" title="Ventana para el mapa de cambio (priors, base Vol)">
-        <button data-lb="0" class="active">1m</button>
-        <button data-lb="1">5m</button>
-        <button data-lb="2">10m</button>
-        <button data-lb="3">15m</button>
-        <button data-lb="4">30m</button>
+      <div class="seg hidden" id="gexLookback" title="Ventana del cambio Δ priors (no es la temporalidad de las velas)">
+        <button data-lb="0" class="active">Δ1m</button>
+        <button data-lb="1">Δ5m</button>
+        <button data-lb="2">Δ10m</button>
+        <button data-lb="3">Δ15m</button>
+        <button data-lb="4">Δ30m</button>
       </div>
       <span class="vp-legend">
         <span><i class="vp-dot" style="background:#26a69a"></i>major + (call wall)</span>
