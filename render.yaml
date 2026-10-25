@@ -15,6 +15,11 @@ services:
         value: https://api.massive.com
       - key: POLYGON_API_KEY
         sync: false        # set this secret in the Render dashboard, not in git
+      # ── GexBot Classic API (opcional: vista "GexBot" del Chart) ──
+      - key: GEXBOT_API_KEY
+        sync: false        # tu clave de la API de GexBot (plan Classic)
+      - key: GEXBOT_BASE_URL
+        value: https://api.gex.bot/v2
       - key: ALLOWED_ORIGINS
         value: "*"      # token-protected API; "*" avoids CORS origin issues
       # ── access via the Aula Virtual (coupon / payment) ──

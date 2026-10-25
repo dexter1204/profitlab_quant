@@ -56,15 +56,6 @@
   // navegador se "robe" el pinch para hacer zoom de la página.
   const CONFIG3D = { responsive: true, displayModeBar: false, scrollZoom: true };
 
-  // chart timeframes → (interval, period) for the bars loader
-  const TF = {
-    "1m":  { interval: "1m",  period: "1d" },
-    "5m":  { interval: "5m",  period: "5d" },
-    "15m": { interval: "15m", period: "1mo" },
-    "1h":  { interval: "60m", period: "3mo" },
-    "1D":  { interval: "1d",  period: "1y" },
-  };
-
   // ── state ────────────────────────────────────────────────────────────────
   const state = {
     view: "gamma",
@@ -77,7 +68,12 @@
     deltaKind: "call",             // delta surface: call | put
     volMode: "drift",              // volatility: drift | surface
     surf3d: true,                  // surfaces: 3D (default) | 2D heatmap
-    timeframe: "5m",               // chart timeframe
+    gexCategory: "full",           // Chart GexBot: agg | 0DTE | next
+    gexCol: "gex",                 // Chart histograma lateral: gex | delta (priors)
+    gexMetric: "oi",               // Chart GexBot perfil: oi | vol
+    gexLookback: "0",              // Chart GexBot priors: índice 0..4 (1/5/10/15/30m)
+    rpCategory: "full",            // Replay: agg | 0DTE | next
+    rpMetric: "oi",                // Replay walls: oi | vol
     loaded: new Set(),             // "view:symbol[:sub]" already fetched+rendered
   };
 
@@ -339,53 +335,6 @@
     });
   }
 
-  // ── view 2: CHART (candles + GEX profile sharing the price axis) ──────────
-  function renderChart(d) {
-    const L = d.levels || {};
-    const bars = d.bars || [];
-    const traces = [];
-    if (bars.length) {
-      traces.push({
-        type: "candlestick",
-        x: bars.map((b) => b.t),
-        open: bars.map((b) => b.o), high: bars.map((b) => b.h),
-        low: bars.map((b) => b.l), close: bars.map((b) => b.c),
-        increasing: { line: { color: C.green } }, decreasing: { line: { color: C.red } },
-        name: d.ticker, xaxis: "x", yaxis: "y",
-      });
-    }
-    // GEX profile column on the right, same price (y) scale
-    const gexColors = (d.gex || []).map((v) => (v >= 0 ? C.green : C.red));
-    traces.push({
-      type: "bar", orientation: "h", x: d.gex || [], y: d.strikes || [],
-      marker: { color: gexColors, line: { width: 0 } }, name: "GEX", opacity: 0.85,
-      hovertemplate: "Strike %{y}<br>GEX %{x:$,.0f}<extra></extra>",
-      xaxis: "x2", yaxis: "y2",
-    });
-
-    const { shapes, anns } = levelShapes(d, L);
-    const hasBars = bars.length > 0;
-    const layout = Object.assign({}, BASE_LAYOUT, {
-      margin: { l: 58, r: 60, t: 30, b: 34 },
-      showlegend: false, shapes, annotations: anns,
-      xaxis: { domain: [0, 0.80], anchor: "y", rangeslider: { visible: false },
-        gridcolor: C.grid, tickfont: { size: 10 }, type: "date" },
-      yaxis: { domain: [0, 1], anchor: "x", side: "right", gridcolor: C.grid,
-        tickfont: { size: 10 }, title: { text: "Price", font: { size: 10 } },
-        fixedrange: false },
-      xaxis2: { domain: [0.82, 1], anchor: "y2", showgrid: false, zeroline: true,
-        zerolinecolor: C.border, title: { text: "GEX", font: { size: 9 } },
-        tickfont: { size: 8 } },
-      yaxis2: { domain: [0, 1], anchor: "x2", matches: "y", showticklabels: false,
-        showgrid: false },
-    });
-    if (!hasBars) {
-      anns.push({ xref: "paper", yref: "paper", x: 0.4, y: 0.5, showarrow: false,
-        text: "Intraday bars no disponibles para este símbolo/plan —<br>mostrando perfil GEX y niveles.",
-        font: { size: 12, color: C.muted }, align: "center" });
-    }
-    Plotly.react(el("priceChart"), traces, layout, CONFIG);
-  }
 
   // ── view 3: GEX / DEX HEATMAP (strike × DTE table, SpotGamma-style) ───────
   // Compact value label without a currency sign: 40.2M, -128.3M, 973.6K…
@@ -1052,57 +1001,98 @@
     if (!candles.length) setError(`Sin velas intradía para ${d.ticker} (los niveles sí se muestran).`);
   }
 
-  // ── Chart (TradingView · Lightweight Charts) ──────────────────────────────
-  // Velas intradia CONTINUAS (LWC secuencia las barras y comprime los huecos
-  // de noche/fin de semana, al contrario que un eje de fecha de Plotly) +
-  // perfil GEX por strike superpuesto a la derecha + niveles clave.
-  const _cht = { chart: null, series: null, canvas: null, ctx: null, lines: [], data: null, lastKey: null };
+  // ── Chart GexBot: velas (precio real) + niveles e histograma de GexBot ──────
+  // Estilo GexBot classic: velas LWC del feed de precio + líneas de nivel reales
+  // (zero γ, major ±, spot) + un histograma lateral (canvas, anclado al eje de
+  // precio) que muestra, según el toggle, el perfil GEX por strike (A, OI/Vol) o
+  // el cambio intradía por strike vía priors (C, 1/5/10/15/30m). + panel.
+  const _LB_LBL = ["1m", "5m", "10m", "15m", "30m"];
+  const _gc = { chart: null, series: null, canvas: null, ctx: null, lines: [], data: null, lastKey: null };
 
-  function _chtSize() {
-    const host = el("priceChart"); if (!host || !host._lwc) return;
-    const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
-    _cht.chart.resize(w, h);
-    const dpr = window.devicePixelRatio || 1;
-    _cht.canvas.width = w * dpr; _cht.canvas.height = h * dpr;
-    _cht.canvas.style.width = w + "px"; _cht.canvas.style.height = h + "px";
-    _cht.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function _gxFmt(x) {
+    if (x == null || !isFinite(x)) return "—";
+    return Number(x).toLocaleString("es", { maximumFractionDigits: 2 });
   }
-  function _chtDraw() {
-    const host = el("priceChart"); if (!host || !host._lwc || !_cht.data) return;
-    const w = host.clientWidth, h = host.clientHeight;
-    const ctx = _cht.ctx; ctx.clearRect(0, 0, w, h);
-    const gex = _cht.data.gex || [], strikes = _cht.data.strikes || [];
-    if (!gex.length || !strikes.length) return;
-    const psW = _cht.chart.priceScale("right").width() || 0;
+  function _gxCompact(v) {
+    if (v == null || !isFinite(v)) return "—";
+    const a = Math.abs(v), s = v < 0 ? "−" : "";
+    if (a >= 1e9) return s + (a / 1e9).toFixed(1) + "B";
+    if (a >= 1e6) return s + (a / 1e6).toFixed(1) + "M";
+    if (a >= 1e3) return s + (a / 1e3).toFixed(1) + "K";
+    return s + a.toFixed(0);
+  }
+
+  // Valores del histograma lateral: perfil GEX (OI/Vol) o Δ por priors.
+  function _gcColValues(d) {
+    if (state.gexCol === "delta") {
+      const lb = Math.max(0, Math.min(parseInt(state.gexLookback, 10) || 0, 4));
+      return (d.strikes || []).map((_, i) => {
+        const now = (d.gex_vol || [])[i];
+        const pr = ((d.priors || [])[i] || [])[lb];
+        if (now == null || pr == null || pr === 0) return null;
+        return now - pr;
+      });
+    }
+    return (state.gexMetric === "vol" ? d.gex_vol : d.gex_oi) || [];
+  }
+  function _gcSize() {
+    const host = el("gexProfile"); if (!host || !host._lwc) return;
+    const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return;
+    _gc.chart.resize(w, h);
+    const dpr = window.devicePixelRatio || 1;
+    _gc.canvas.width = w * dpr; _gc.canvas.height = h * dpr;
+    _gc.canvas.style.width = w + "px"; _gc.canvas.style.height = h + "px";
+    _gc.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function _gcDraw() {
+    const host = el("gexProfile"); if (!host || !host._lwc || !_gc.data) return;
+    const d = _gc.data, w = host.clientWidth, h = host.clientHeight;
+    const ctx = _gc.ctx; ctx.clearRect(0, 0, w, h);
+    const strikes = d.strikes || []; if (!strikes.length) return;
+    const vals = _gcColValues(d);
+    const psW = _gc.chart.priceScale("right").width() || 0;
     const rightEdge = w - psW - 2;
-    const maxBarW = Math.min(0.16 * (w - psW), 120);   // columna GEX estrecha
-    const maxAbs = Math.max.apply(null, gex.map(Math.abs)) || 1;
-    const step = strikes.length > 1 ? Math.abs(strikes[1] - strikes[0]) : 1;
+    const maxBarW = Math.min(0.40 * (w - psW), 300);
+    let maxAbs = 0;
+    for (const v of vals) if (v != null && isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+    if (!maxAbs) maxAbs = 1;
+    // Barras FINAS (altura fija ~2px) ancladas al strike, no al paso completo:
+    // así los niveles se ven delgados y separados en vez de un bloque macizo.
+    const bh = 2;
     for (let i = 0; i < strikes.length; i++) {
-      const yC = _cht.series.priceToCoordinate(strikes[i]);
-      if (yC == null) continue;
-      const yT = _cht.series.priceToCoordinate(strikes[i] + step / 2);
-      const yB = _cht.series.priceToCoordinate(strikes[i] - step / 2);
-      const bh = (yT != null && yB != null) ? Math.max(2, Math.abs(yB - yT) - 1) : 4;
-      const bw = (Math.abs(gex[i]) / maxAbs) * maxBarW;
-      ctx.fillStyle = gex[i] >= 0 ? "rgba(38,166,154,0.55)" : "rgba(239,83,80,0.55)";
+      const v = vals[i]; if (v == null || !isFinite(v) || v === 0) continue;
+      const yC = _gc.series.priceToCoordinate(strikes[i]);
+      if (yC == null || yC < -2 || yC > h + 2) continue;   // fuera de pantalla → no dibujar
+      const bw = (Math.abs(v) / maxAbs) * maxBarW;
+      ctx.fillStyle = v >= 0 ? "rgba(38,166,154,0.85)" : "rgba(239,83,80,0.85)";
       ctx.fillRect(rightEdge - bw, yC - bh / 2, bw, bh);
     }
   }
-  function _chtLines(d) {
-    _cht.lines.forEach((l) => { try { _cht.series.removePriceLine(l); } catch (_) {} });
-    _cht.lines = [];
-    const L = d.levels || {};
-    const defs = [[L.call_wall, "#26a69a", "Call Wall"], [L.put_wall, "#ef5350", "Put Wall"], [L.gamma_flip, "#a855f7", "γ Flip"]];
-    for (const [price, color, title] of defs) {
-      if (price == null || !isFinite(price)) continue;
-      _cht.lines.push(_cht.series.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title }));
-    }
+  function _gcLines(d) {
+    _gc.lines.forEach((l) => { try { _gc.series.removePriceLine(l); } catch (_) {} });
+    _gc.lines = [];
+    const vol = state.gexMetric === "vol";
+    const add = (price, color, title, solid) => {
+      if (price == null || !isFinite(price) || price === 0) return;
+      _gc.lines.push(_gc.series.createPriceLine({
+        price, color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2,
+        axisLabelVisible: true, title,
+      }));
+    };
+    add(vol ? d.major_pos_vol : d.major_pos_oi, "#26a69a", "major +", false);
+    add(d.zero_gamma, "#f59e0b", "zero γ", false);
+    add(vol ? d.major_neg_vol : d.major_neg_oi, "#ef5350", "major −", false);
+    add(d.spot, _cssVar("--text-2", "#9aa4b2"), "spot", true);
   }
-  function renderChartLWC(d) {
-    const host = el("priceChart");
-    const first = !host._lwc;
-    if (first) {
+  function _gcStats(d) {
+    const st = el("gexStats"); if (!st) return;
+    st.innerHTML = `🤖 <b>${d.ticker}</b> · ${d.category || ""} · spot <b>${_gxFmt(d.spot)}</b> · ` +
+      `zero γ <b>${_gxFmt(d.zero_gamma)}</b> · net ${_gxCompact(state.gexMetric === "vol" ? d.net_gex_vol : d.net_gex_oi)}`;
+  }
+  function renderGexChart(d) {
+    const host = el("gexProfile");
+    const firstBuild = !host._lwc;
+    if (firstBuild) {
       host.innerHTML = ""; host.style.position = "relative";
       const canvas = document.createElement("canvas");
       canvas.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;";
@@ -1111,39 +1101,177 @@
       const series = chart.addCandlestickSeries({
         upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
         wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+        // Ensancha el eje de precio para que se vea el escalón de strikes
+        // alrededor del spot (si no, se amontonan en el rango de las velas).
+        autoscaleInfoProvider: (orig) => {
+          const r = _gc.range;
+          if (r) return { priceRange: { minValue: r.lo, maxValue: r.hi } };
+          return orig();
+        },
       });
-      _cht.chart = chart; _cht.series = series; _cht.canvas = canvas; _cht.ctx = canvas.getContext("2d");
+      _gc.chart = chart; _gc.series = series; _gc.canvas = canvas; _gc.ctx = canvas.getContext("2d");
       host._lwc = chart;
-      chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_chtDraw));
-      host.addEventListener("wheel", () => requestAnimationFrame(_chtDraw), { passive: true });
-      new ResizeObserver(() => { _chtSize(); requestAnimationFrame(_chtDraw); }).observe(host);
+      chart.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(_gcDraw));
+      host.addEventListener("wheel", () => requestAnimationFrame(_gcDraw), { passive: true });
+      new ResizeObserver(() => { _gcSize(); requestAnimationFrame(_gcDraw); }).observe(host);
     } else {
-      _cht.chart.applyOptions(_lvlOpts());
+      _gc.chart.applyOptions(_lvlOpts());
     }
-    _cht.data = d;
-    const seen = new Set();
-    const candles = (d.bars || [])
-      .filter((b) => b.c != null)
-      .map((b) => ({ time: Math.floor(new Date(b.t).getTime() / 1000), open: b.o, high: b.h, low: b.l, close: b.c }))
-      .filter((c) => isFinite(c.time))
-      .sort((a, b) => a.time - b.time)
-      .filter((c) => { if (seen.has(c.time)) return false; seen.add(c.time); return true; });
-    _cht.series.setData(candles);
-    _chtSize();
-    const key = d.ticker + ":" + state.timeframe;
-    if (first || _cht.lastKey !== key) _cht.chart.timeScale().fitContent();
-    _cht.lastKey = key;
-    _chtLines(d);
-    requestAnimationFrame(_chtDraw);
-    if (!candles.length) setError(`Sin velas intradía para ${d.ticker}/${state.timeframe} (prueba otro timeframe o símbolo).`);
+    _gc.data = d;
+    const candles = (d.candles || []).filter((c) => c.close != null && isFinite(c.time));
+    // Rango de precio a mostrar: velas + niveles cercanos, con un mínimo de
+    // ±1% alrededor del spot para que el escalón de strikes se reparta.
+    const spot = (d.spot != null && isFinite(d.spot)) ? d.spot : null;
+    let lo = Infinity, hi = -Infinity;
+    for (const c of candles) { if (c.low < lo) lo = c.low; if (c.high > hi) hi = c.high; }
+    const near = [d.zero_gamma, d.major_neg_oi, d.major_neg_vol, spot]
+      .filter((x) => x != null && isFinite(x) && x > 0);
+    for (const v of near) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (isFinite(lo) && isFinite(hi) && spot) {
+      lo = Math.min(lo, spot * 0.99); hi = Math.max(hi, spot * 1.01);  // mínimo ±1%
+      const pad = (hi - lo) * 0.06;
+      _gc.range = { lo: lo - pad, hi: hi + pad };
+    } else {
+      _gc.range = null;
+    }
+    _gc.series.setData(candles.map((c) =>
+      ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    try { _gc.chart.priceScale("right").applyOptions({ autoScale: true }); } catch (_) {}
+    _gcSize();
+    const key = d.ticker + ":" + d.category + ":" + (d.interval || "");
+    if (firstBuild || _gc.lastKey !== key) _gc.chart.timeScale().fitContent();
+    _gc.lastKey = key;
+    _gcLines(d);
+    _gexPanelFill(d);
+    _gcStats(d);
+    requestAnimationFrame(_gcDraw);
+    if (!candles.length) setError(`Sin velas intradía para ${d.ticker} (los niveles sí se muestran).`);
   }
+  // Redibuja histograma + líneas + panel SIN refetch (toggles columna/métrica/lookback).
+  function _gcRedraw() {
+    if (!_gc.data) return;
+    _gcLines(_gc.data);
+    _gexPanelFill(_gc.data);
+    _gcStats(_gc.data);
+    requestAnimationFrame(_gcDraw);
+  }
+
+  // Panel de lectura compartido (Chart y Replay): régimen, spot, niveles, net, max change.
+  function _panelFill(elId, d, metricVol) {
+    const p = el(elId); if (!p) return;
+    const net = metricVol ? d.net_gex_vol : d.net_gex_oi;
+    const long = net != null && net >= 0;
+    const mpos = metricVol ? d.major_pos_vol : d.major_pos_oi;
+    const mneg = metricVol ? d.major_neg_vol : d.major_neg_oi;
+    const rows = [];
+    rows.push(`<div class="row"><span>régimen</span><span class="regime ${long ? "long" : "short"}">${long ? "LONG γ" : "SHORT γ"}</span></div>`);
+    rows.push(`<div class="row"><span>spot</span><b>${_gxFmt(d.spot)}</b></div>`);
+    rows.push(`<div class="row"><span>zero γ</span><b>${_gxFmt(d.zero_gamma)}</b></div>`);
+    if (d.min_dte != null) rows.push(`<div class="row"><span>min DTE</span><b>${d.min_dte}</b></div>`);
+    rows.push(`<h4>niveles (${metricVol ? "Vol" : "OI"})</h4>`);
+    rows.push(`<div class="row"><span>major +</span><b class="pos">${_gxFmt(mpos)}</b></div>`);
+    rows.push(`<div class="row"><span>major −</span><b class="neg">${_gxFmt(mneg)}</b></div>`);
+    rows.push(`<div class="row"><span>net GEX</span><b class="${long ? "pos" : "neg"}">${_gxCompact(net)}</b></div>`);
+    if (Array.isArray(d.maxchange_rows) && d.maxchange_rows.length) {
+      rows.push(`<h4>max change</h4>`);
+      for (const r of d.maxchange_rows) {
+        const pos = (r.value || 0) >= 0;
+        rows.push(`<div class="row"><span>${r.window} · ${_gxFmt(r.strike)}</span><b class="${pos ? "pos" : "neg"}">${_gxCompact(r.value)}</b></div>`);
+      }
+    }
+    p.innerHTML = rows.join("");
+    p.classList.remove("hidden");
+  }
+  function _gexPanelFill(d) { _panelFill("gexPanel", d, state.gexMetric === "vol"); }
+
+  // ── Replay (B): reproducir el último día con los niveles REALES de GexBot ───
+  // Línea de precio (spot histórico de GexBot) + 3 líneas de nivel (zero γ,
+  // major ±) que crecen hasta el cursor. Datos de /api/gexbot/replay (hist/eod).
+  const _rp = {
+    chart: null, spot: null, zg: null, mpos: null, mneg: null,
+    points: [], i: 0, playing: false, timer: null, speed: 1, meta: null, lastKey: null,
+  };
+  function _rpBuild(host) {
+    const chart = LightweightCharts.createChart(host, _lvlOpts());
+    _rp.spot = chart.addLineSeries({ color: _cssVar("--text-2", "#9aa4b2"), lineWidth: 2 });
+    _rp.mpos = chart.addLineSeries({ color: C.green, lineWidth: 1, lineStyle: 2 });
+    _rp.zg = chart.addLineSeries({ color: C.amber, lineWidth: 1, lineStyle: 2 });
+    _rp.mneg = chart.addLineSeries({ color: C.red, lineWidth: 1, lineStyle: 2 });
+    _rp.chart = chart; host._lwc = chart;
+    new ResizeObserver(() => { const w = host.clientWidth, h = host.clientHeight; if (w && h) chart.resize(w, h); }).observe(host);
+  }
+  function renderReplay(d) {
+    const host = el("replayChart"); if (!host) return;
+    const ld = host.querySelector(".loading"); if (ld) ld.remove();
+    if (!host._lwc) _rpBuild(host);
+    _rp.points = (d.points || []).filter((p) => p.t && p.spot != null);
+    _rp.i = _rp.points.length - 1;        // arranca en el cierre; el usuario rebobina
+    _rp.meta = { ticker: d.ticker, date: d.date, count_raw: d.count_raw, category: d.category };
+    const seek = el("rpSeek");
+    if (seek) { seek.min = "0"; seek.max = String(Math.max(0, _rp.points.length - 1)); seek.value = String(_rp.i); }
+    _rpStop();
+    _rpDraw(true);
+    if (!_rp.points.length) setError(`Sin histórico EOD para ${d.ticker} (prueba otro símbolo).`);
+  }
+  function _rpDraw(fit) {
+    const n = _rp.points.length; if (!n || !_rp.chart) return;
+    const vol = state.rpMetric === "vol";
+    const i = Math.max(0, Math.min(_rp.i, n - 1));
+    const upto = _rp.points.slice(0, i + 1);
+    const line = (key) => upto.map((p) => ({ time: p.t, value: p[key] }))
+      .filter((x) => x.value != null && isFinite(x.value) && x.value !== 0);
+    _rp.spot.setData(upto.map((p) => ({ time: p.t, value: p.spot })).filter((x) => x.value != null));
+    _rp.mpos.setData(line(vol ? "major_pos_vol" : "major_pos_oi"));
+    _rp.zg.setData(line("zero_gamma"));
+    _rp.mneg.setData(line(vol ? "major_neg_vol" : "major_neg_oi"));
+    if (fit && n > 1) {
+      try { _rp.chart.timeScale().setVisibleRange({ from: _rp.points[0].t, to: _rp.points[n - 1].t }); }
+      catch (_) { _rp.chart.timeScale().fitContent(); }
+    }
+    _rpPanelFill(i);
+    _rpUI(i);
+  }
+  function _rpPanelFill(i) {
+    const p = _rp.points[i]; if (!p) return;
+    _panelFill("rpPanel", {
+      spot: p.spot, zero_gamma: p.zero_gamma,
+      major_pos_oi: p.major_pos_oi, major_neg_oi: p.major_neg_oi,
+      major_pos_vol: p.major_pos_vol, major_neg_vol: p.major_neg_vol,
+      net_gex_oi: p.net_gex_oi, net_gex_vol: p.net_gex_vol,
+      min_dte: null, maxchange_rows: [],
+    }, state.rpMetric === "vol");
+  }
+  function _rpUI(i) {
+    const seek = el("rpSeek"); if (seek) seek.value = String(i);
+    const lbl = el("rpLabel"), p = _rp.points[i];
+    if (lbl && p) {
+      const t = new Date(p.t * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+      lbl.textContent = `${_rp.meta ? _rp.meta.date : ""} · ${t} · ${i + 1}/${_rp.points.length}`;
+    }
+  }
+  function _rpStop() {
+    if (_rp.timer) { clearInterval(_rp.timer); _rp.timer = null; }
+    _rp.playing = false;
+    const b = document.querySelector('#rpTransport [data-rp="play"]'); if (b) b.textContent = "▶";
+  }
+  function _rpPlay() {
+    if (!_rp.points.length) return;
+    if (_rp.i >= _rp.points.length - 1) _rp.i = 0;
+    _rp.playing = true;
+    const b = document.querySelector('#rpTransport [data-rp="play"]'); if (b) b.textContent = "⏸";
+    _rp.timer = setInterval(() => {
+      if (_rp.i >= _rp.points.length - 1) { _rpStop(); return; }
+      _rp.i += 1; _rpDraw(false);
+    }, 180 / (_rp.speed || 1));
+  }
+  function _rpSeek(i) { _rp.i = Math.max(0, Math.min(i, _rp.points.length - 1)); _rpDraw(false); }
 
   const VIEWS = {
     gamma:   { plot: "gammaChart", symbolic: true,  path: (s) => `/api/analyze/${s}?window=24`, render: renderGamma },
-    chart:   { plot: "priceChart", symbolic: true,  engine: "lwc",  sub: () => state.timeframe,
-               path: (s) => { const t = TF[state.timeframe] || TF["5m"];
-                 return `/api/chart/${s}?window=24&interval=${t.interval}&period=${t.period}`; },
-               render: renderChartLWC },
+    chart:   { plot: "gexProfile", symbolic: true,  engine: "lwc", sub: () => state.gexCategory,
+               path: (s) => `/api/gexbot/${s}?category=${state.gexCategory}&interval=5m`, render: renderGexChart },
+    replay:  { plot: "replayChart", symbolic: true, engine: "lwc", sub: () => state.rpCategory,
+               path: (s) => `/api/gexbot/replay/${s}?category=${state.rpCategory}&points=600`, render: renderReplay },
     gexheat: { plot: "gexHeat",    symbolic: true,  path: (s) => `/api/gex_heatmap/${s}`,        render: renderGexHeat },
     spectrum:{ plot: "spectrum",   symbolic: true,  path: (s) => `/api/gex_heatmap/${s}?window=30&exp=10`, render: renderSpectrum },
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
@@ -1161,6 +1289,8 @@
 
   async function loadView(view, { force = false } = {}) {
     const def = VIEWS[view];
+    // Vistas estáticas (p. ej. el iframe de GexBot): no piden datos al backend.
+    if (def.static) { setError(""); def.render(); return; }
     const plotEl = el(def.plot);
     const sym = def.symbolic ? state.symbol : "_";
     const sub = def.sub ? def.sub() : "";
@@ -1195,6 +1325,7 @@
   }
 
   function switchTo(view) {
+    if (view !== "replay") _rpStop();        // no seguir reproduciendo fuera del Replay
     state.view = view;
     for (const t of document.querySelectorAll(".tab"))
       t.classList.toggle("active", t.dataset.view === view);
@@ -1202,7 +1333,15 @@
       s.classList.toggle("hidden", s.id !== `view-${view}`);
     loadView(view).then(() => {
       const c = el(VIEWS[view].plot);
-      if (c && c.data) Plotly.Plots.resize(c);
+      if (c && c.data) Plotly.Plots.resize(c);                 // Plotly
+      if (view === "chart" && _gc.chart) {                     // LWC: reajusta al mostrar
+        const h = el("gexProfile");
+        if (h) { _gc.chart.resize(h.clientWidth, h.clientHeight); _gcSize(); requestAnimationFrame(_gcDraw); }
+      }
+      if (view === "replay" && _rp.chart) {                    // LWC: reencuadra al mostrar
+        const h = el("replayChart");
+        if (h) { _rp.chart.resize(h.clientWidth, h.clientHeight); _rpDraw(true); }
+      }
     });
   }
 
@@ -1344,7 +1483,56 @@
     };
     segReload("deltaKind", "kind", "deltaKind", "dsurf");
     segReload("volMode", "mode", "volMode", "vol");
-    segReload("timeframe", "tf", "timeframe", "chart");
+    segReload("gexCategory", "gc", "gexCategory", "chart");
+    segReload("rpCategory", "gc", "rpCategory", "replay");
+
+    // Chart GexBot: columna lateral GEX | Δ(priors) → muestra métrica o lookback
+    el("gexCol").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.gexCol = b.dataset.col;
+      for (const x of el("gexCol").querySelectorAll("button")) x.classList.toggle("active", x === b);
+      const delta = state.gexCol === "delta";
+      el("gexMetric").classList.toggle("hidden", delta);
+      el("gexLookback").classList.toggle("hidden", !delta);
+      _gcRedraw();
+    });
+    // Chart GexBot: métrica OI/Vol y ventana de priors → redibuja sin refetch
+    el("gexMetric").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.gexMetric = b.dataset.gm;
+      for (const x of el("gexMetric").querySelectorAll("button")) x.classList.toggle("active", x === b);
+      _gcRedraw();
+    });
+    el("gexLookback").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.gexLookback = b.dataset.lb;
+      for (const x of el("gexLookback").querySelectorAll("button")) x.classList.toggle("active", x === b);
+      _gcRedraw();
+    });
+
+    // Replay: métrica de walls OI/Vol → redibuja; transporte, scrubber, velocidad
+    el("rpMetric").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state.rpMetric = b.dataset.gm;
+      for (const x of el("rpMetric").querySelectorAll("button")) x.classList.toggle("active", x === b);
+      _rpDraw(false);
+    });
+    el("rpTransport").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      const a = b.dataset.rp;
+      if (a === "play") { _rp.playing ? _rpStop() : _rpPlay(); }
+      else if (a === "start") { _rpStop(); _rpSeek(0); }
+      else if (a === "back") { _rpStop(); _rpSeek(_rp.i - 1); }
+      else if (a === "fwd") { _rpStop(); _rpSeek(_rp.i + 1); }
+      else if (a === "end") { _rpStop(); _rpSeek(_rp.points.length - 1); }
+    });
+    el("rpSeek").addEventListener("input", (e) => { _rpStop(); _rpSeek(parseInt(e.target.value, 10) || 0); });
+    el("rpSpeed").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      _rp.speed = parseInt(b.dataset.sp, 10) || 1;
+      for (const x of el("rpSpeed").querySelectorAll("button")) x.classList.toggle("active", x === b);
+      if (_rp.playing) { _rpStop(); _rpPlay(); }
+    });
 
     // 3D / 2D toggle for the surface views (re-renders from cached data)
     for (const seg of document.querySelectorAll(".surf3dToggle")) {
@@ -1393,6 +1581,8 @@
       if (document.hidden) return;
       loadReference();
       if (isThreeDNow()) return;
+      // El Replay es un día histórico fijo: no refrescar (pisaría la reproducción).
+      if (state.view === "replay") return;
       loadView(state.view, { force: true }).then(() => {
         const c = el(VIEWS[state.view].plot);
         if (c && c.data) Plotly.Plots.resize(c);

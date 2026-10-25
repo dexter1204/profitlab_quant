@@ -35,6 +35,7 @@ from fastapi import Depends  # noqa: E402
 
 from profitlab import exposures, metrics, regime, iv as ivmod, market  # noqa: E402
 from profitlab import data as pdata  # noqa: E402
+from profitlab.data import gexbot as gexbotmod  # noqa: E402  — GexBot Classic API
 from profitlab import dataquality  # noqa: E402
 from profitlab import volume_profile as vpmod  # noqa: E402
 
@@ -99,6 +100,22 @@ def _cached(key: str, producer):
         return hit[1]
     value = producer()
     _CACHE[key] = (now, value)
+    return value
+
+
+# Separate long-lived cache for the GexBot hist/eod download (a ~30MB ZIP that
+# only changes once per day). Keyed by ticker:category.
+_EOD_CACHE: dict[str, tuple[float, object]] = {}
+_EOD_TTL = 6 * 3600.0  # 6h
+
+
+def _cached_eod(key: str, producer):
+    now = time.time()
+    hit = _EOD_CACHE.get(key)
+    if hit and now - hit[0] < _EOD_TTL:
+        return hit[1]
+    value = producer()
+    _EOD_CACHE[key] = (now, value)
     return value
 
 
@@ -546,12 +563,14 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
     return None
 
 
-def _session_bars(ticker: str, start_min: int = 8 * 60, end_min: int = 15 * 60):
+def _session_bars(ticker: str, start_min: int = 8 * 60, end_min: int = 15 * 60,
+                  interval: str = "1m", period: str = "1d"):
     """Latest trading session's intraday bars, restricted to the regular
     window (default 08:00–15:00). Both the Net Drift and Volatility Drift views
     are intraday, so this keeps them to one clean session (no overnight /
-    extended-hours tail, no multi-day zig-zag)."""
-    bars = _intraday_bars_fallback(ticker)
+    extended-hours tail, no multi-day zig-zag). `interval` lets the Replay view
+    pick a coarser bar (e.g. 5m) while the drift views keep the 1m default."""
+    bars = _intraday_bars_fallback(ticker, interval=interval, period=period)
     if bars is None or not len(bars):
         return None
     bars = bars.dropna(subset=["close"]).copy()
@@ -697,6 +716,164 @@ def levels_chart(ticker: str, window: int = Query(24, ge=5, le=60)):
 
     try:
         return _cached(f"levels_chart:{ticker}:{window}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ── GexBot Classic integration ───────────────────────────────────────────────
+@app.get("/api/gexbot/whoami", dependencies=GATED)
+def gexbot_whoami():
+    """Verify the GexBot API key and show the account/plan it belongs to."""
+    out = {"configured": gexbotmod.is_configured()}
+    if not out["configured"]:
+        out["ok"] = False
+        out["detail"] = "GEXBOT_API_KEY no configurada en el backend."
+        return out
+    try:
+        out["ok"] = True
+        out["whoami"] = gexbotmod.whoami()
+    except Exception as e:
+        out["ok"] = False
+        out["detail"] = str(e)
+    return out
+
+
+def _gexbot_mc_rows(mcd):
+    """Normalize the maxchange payload into [{window, strike, value}] for the
+    1/5/10/15/30-minute lookbacks (plus 'ahora')."""
+    if not isinstance(mcd, dict):
+        return []
+    order = [("current", "ahora"), ("one", "1m"), ("five", "5m"),
+             ("ten", "10m"), ("fifteen", "15m"), ("thirty", "30m")]
+    rows = []
+    for key, label in order:
+        pair = mcd.get(key)
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+            rows.append({"window": label, "strike": _clean(pair[0]),
+                         "value": _clean(pair[1])})
+    return rows
+
+
+@app.get("/api/gexbot/{ticker}", dependencies=GATED)
+def gexbot_chart(ticker: str, category: str = Query("full"),
+                 interval: str = Query("5m")):
+    """GexBot Classic data for the Chart view (candles + A + C).
+
+    Candles — real intraday price bars from our price feed (latest session),
+    so the chart shows price with GexBot's levels overlaid (GexBot classic
+    layout). GexBot's API serves no OHLC, only `spot`.
+    A — per-strike net GEX profile (OI and Vol) + key levels (zero gamma,
+    major +/-), spot, net GEX and the max-change table.
+    C — the per-strike `priors` matrix (1/5/10/15/30-minute lookback GEX,
+    vol-based) for the build/drain column."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        snap = gexbotmod.classic(ticker, category)
+        try:
+            mc = gexbotmod.maxchange(ticker, category)
+        except Exception:
+            mc = None
+
+        # Real price candles (latest session) from our feed — GexBot has none.
+        candles = []
+        try:
+            bars = _session_bars(ticker, interval=interval, period="1d")
+            if bars is not None and len(bars):
+                candles = [
+                    {
+                        "time": int(pd.Timestamp(r.ts).timestamp()),
+                        "open": _clean(r.open), "high": _clean(r.high),
+                        "low": _clean(r.low), "close": _clean(r.close),
+                    }
+                    for r in bars.itertuples()
+                ]
+        except Exception:
+            candles = []
+
+        rows = snap["strikes"]
+        strikes = [float(r["strike"]) for r in rows]
+        gex_oi = [_clean(r["gex_oi"]) for r in rows]
+        gex_vol = [_clean(r["gex_vol"]) for r in rows]
+        # priors aligned with strikes; pad/truncate to 5 windows (1/5/10/15/30m)
+        priors = []
+        for r in rows:
+            p = list(r.get("priors") or [])
+            p = (p + [0.0] * 5)[:5]
+            priors.append([_clean(v) for v in p])
+
+        return {
+            "ticker": ticker,
+            "source": "gexbot",
+            "category": snap.get("category"),
+            "interval": interval,
+            "candles": candles,
+            "timestamp": snap.get("timestamp"),
+            "spot": _clean(snap.get("spot")),
+            "min_dte": snap.get("min_dte"),
+            "sec_min_dte": snap.get("sec_min_dte"),
+            "zero_gamma": _clean(snap.get("zero_gamma")),
+            "major_pos_oi": _clean(snap.get("major_pos_oi")),
+            "major_pos_vol": _clean(snap.get("major_pos_vol")),
+            "major_neg_oi": _clean(snap.get("major_neg_oi")),
+            "major_neg_vol": _clean(snap.get("major_neg_vol")),
+            "net_gex_oi": _clean(snap.get("net_gex_oi")),
+            "net_gex_vol": _clean(snap.get("net_gex_vol")),
+            "delta_risk_reversal": _clean(snap.get("delta_risk_reversal")),
+            "strikes": strikes,
+            "gex_oi": gex_oi,
+            "gex_vol": gex_vol,
+            "priors": priors,                   # [[1m,5m,10m,15m,30m], …] vol-based
+            "prior_windows": list(gexbotmod.PRIOR_WINDOWS),
+            "maxchange_rows": _gexbot_mc_rows(mc),
+        }
+
+    try:
+        return _cached(f"gexbot:{ticker}:{category}:{interval}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/gexbot/replay/{ticker}", dependencies=GATED)
+def gexbot_replay(ticker: str,
+                  category: str = Query("full"),
+                  points: int = Query(600, ge=50, le=2000)):
+    """Replay/backtest series (B) for the latest end-of-day recording.
+
+    GexBot's hist/eod gives the full intraday series of classic snapshots for
+    the last trading day. We downsample to ~`points` and return spot + the
+    real evolving levels (zero gamma, major +/-, net GEX) over the session, so
+    the Replay page can play the day back with price against GexBot's own
+    levels. Cached ~6h (the EOD day changes only once per day)."""
+    ticker = ticker.upper().strip()
+
+    def _compute():
+        ser = gexbotmod.hist_eod_series(ticker, category, target_points=points)
+        pts = [
+            {
+                "t": p.get("t"),
+                "spot": _clean(p.get("spot")),
+                "zero_gamma": _clean(p.get("zero_gamma")),
+                "major_pos_oi": _clean(p.get("major_pos_oi")),
+                "major_neg_oi": _clean(p.get("major_neg_oi")),
+                "major_pos_vol": _clean(p.get("major_pos_vol")),
+                "major_neg_vol": _clean(p.get("major_neg_vol")),
+                "net_gex_oi": _clean(p.get("net_gex_oi")),
+                "net_gex_vol": _clean(p.get("net_gex_vol")),
+            }
+            for p in ser.get("points", [])
+        ]
+        return {
+            "ticker": ticker,
+            "source": "gexbot",
+            "category": ser.get("category"),
+            "date": ser.get("date"),
+            "count_raw": ser.get("count_raw"),
+            "points": pts,
+        }
+
+    try:
+        return _cached_eod(f"gexbot_eod:{ticker}:{category}:{points}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

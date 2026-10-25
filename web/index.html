@@ -79,6 +79,24 @@
   .vp-legend span { display: inline-flex; align-items: center; gap: 5px; }
   .vp-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
   .assetname { font-size: 14px; color: var(--text-2); white-space: nowrap; }
+  /* Replay transport bar */
+  .replay-bar { margin-top: calc(-1 * var(--s2)); }
+  .replay-seek { flex: 1; min-width: 180px; min-height: 0; height: 26px; padding: 0;
+    background: transparent; border: 0; cursor: pointer; accent-color: var(--accent); }
+  .replay-seek:focus { box-shadow: none; }
+  /* GexBot readout panel (overlay card, estilo GexBot classic) */
+  .gex-panel { position: absolute; bottom: 10px; left: 10px; width: 216px; z-index: 3;
+    background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+    font-size: 11.5px; color: var(--text-2); box-shadow: var(--shadow-sm); pointer-events: none; }
+  .gex-panel h4 { margin: 8px 0 3px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); font-weight: 650; }
+  .gex-panel h4:first-child { margin-top: 0; }
+  .gex-panel .row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+  .gex-panel .row b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .gex-panel .pos { color: var(--green); } .gex-panel .neg { color: var(--red); }
+  .gex-panel .regime { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10px; }
+  .gex-panel .regime.long { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+  .gex-panel .regime.short { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
   .assetname b { color: var(--text); font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
   /* Una sola fila: se ancla a la derecha y, si algún ancho no diera, hace
      scroll horizontal (nunca envuelve ni recorta). */
@@ -274,7 +292,8 @@
   <div class="shell">
     <aside class="siderail" id="tabs">
       <button class="tab active" data-view="gamma">Gamma &amp; Flow</button>
-      <button class="tab" data-view="chart">Chart</button>
+      <button class="tab" data-view="chart">Chart GexBot</button>
+      <button class="tab" data-view="replay">Replay</button>
       <button class="tab" data-view="gexheat">GEX Heatmap</button>
       <button class="tab" data-view="spectrum">Espectro 3D</button>
       <button class="tab" data-view="oi">OI / % OI</button>
@@ -302,19 +321,83 @@
     </div>
   </section>
 
-  <!-- ── CHART ── -->
+  <!-- ── CHART GexBot (A perfil + C dinámica priors) ── -->
   <section id="view-chart" class="view hidden">
     <div class="toolbar">
-      <div class="seg" id="timeframe">
-        <button data-tf="1m">1m</button>
-        <button data-tf="5m" class="active">5m</button>
-        <button data-tf="15m">15m</button>
-        <button data-tf="1h">1h</button>
-        <button data-tf="1D">1D</button>
+      <div class="seg" id="gexCategory">
+        <button data-gc="full" class="active">agg</button>
+        <button data-gc="zero">0DTE</button>
+        <button data-gc="one">next</button>
       </div>
-      <span class="hint">velas continuas · scroll = zoom · arrastra = mover · perfil GEX y niveles a la derecha</span>
+      <div class="seg" id="gexCol" title="Qué muestra el histograma lateral">
+        <button data-col="gex" class="active">GEX</button>
+        <button data-col="delta">Δ priors</button>
+      </div>
+      <div class="seg" id="gexMetric">
+        <button data-gm="oi" class="active">OI</button>
+        <button data-gm="vol">Vol</button>
+      </div>
+      <div class="seg hidden" id="gexLookback" title="Ventana para el mapa de cambio (priors, base Vol)">
+        <button data-lb="0" class="active">1m</button>
+        <button data-lb="1">5m</button>
+        <button data-lb="2">10m</button>
+        <button data-lb="3">15m</button>
+        <button data-lb="4">30m</button>
+      </div>
+      <span class="vp-legend">
+        <span><i class="vp-dot" style="background:#26a69a"></i>major + (call wall)</span>
+        <span><i class="vp-dot" style="background:#f59e0b"></i>zero γ</span>
+        <span><i class="vp-dot" style="background:#ef5350"></i>major − (put wall)</span>
+      </span>
+      <span class="hint" id="gexStats">velas (precio real) + niveles e histograma de GexBot encima</span>
     </div>
-    <div class="panel"><div id="priceChart" class="plot tall"><div class="loading">Cargando…</div></div></div>
+    <div class="panel" style="position:relative">
+      <div id="gexProfile" class="plot tall"><div class="loading">Cargando…</div></div>
+      <div id="gexPanel" class="gex-panel hidden"></div>
+    </div>
+  </section>
+
+  <!-- ── REPLAY (B: reproducir el último día con niveles reales) ── -->
+  <section id="view-replay" class="view hidden">
+    <div class="toolbar">
+      <div class="seg" id="rpCategory">
+        <button data-gc="full" class="active">agg</button>
+        <button data-gc="zero">0DTE</button>
+        <button data-gc="one">next</button>
+      </div>
+      <div class="seg" id="rpMetric" title="Métrica de los walls / net">
+        <button data-gm="oi" class="active">OI</button>
+        <button data-gm="vol">Vol</button>
+      </div>
+      <span class="vp-legend">
+        <span><i class="vp-dot" style="background:#9aa4b2"></i>precio (spot)</span>
+        <span><i class="vp-dot" style="background:#26a69a"></i>major +</span>
+        <span><i class="vp-dot" style="background:#f59e0b"></i>zero γ</span>
+        <span><i class="vp-dot" style="background:#ef5350"></i>major −</span>
+      </span>
+      <span class="hint" id="rpStats">reproduce el último día de cierre con los niveles reales de GexBot moviéndose con el precio</span>
+    </div>
+    <div class="toolbar replay-bar" id="rpBar">
+      <div class="seg" id="rpTransport">
+        <button data-rp="start" title="Inicio">⏮</button>
+        <button data-rp="back" title="Atrás">◀</button>
+        <button data-rp="play" title="Reproducir / pausar">▶</button>
+        <button data-rp="fwd" title="Adelante">▶❘</button>
+        <button data-rp="end" title="Fin">⏭</button>
+      </div>
+      <input type="range" id="rpSeek" class="replay-seek" min="0" max="0" value="0" step="1" />
+      <div class="seg" id="rpSpeed">
+        <button data-sp="1" class="active">1×</button>
+        <button data-sp="2">2×</button>
+        <button data-sp="4">4×</button>
+        <button data-sp="8">8×</button>
+      </div>
+      <span class="hint" id="rpLabel">—</span>
+    </div>
+    <div class="panel" style="position:relative">
+      <div id="replayChart" class="plot tall"><div class="loading">Cargando…</div></div>
+      <div id="rpPanel" class="gex-panel hidden"></div>
+    </div>
   </section>
 
   <!-- ── GEX / DEX HEATMAP ── -->
