@@ -582,6 +582,40 @@ def _session_bars(ticker: str, start_min: int = 8 * 60, end_min: int = 15 * 60,
     return bars.sort_values("ts").reset_index(drop=True)
 
 
+# Minutes per bar, for sizing the history window of _history_bars.
+_IV_MIN = {"1m": 1, "2m": 2, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+           "60m": 60, "1h": 60}
+
+
+def _history_bars(ticker: str, interval: str = "5m", min_bars: int = 1000,
+                  start_min: int = 8 * 60, end_min: int = 15 * 60):
+    """Multi-day intraday bars for the GexBot chart: at least `min_bars`
+    regular-hours candles. Unlike `_session_bars` (latest day only, for the
+    intraday drift views), this reaches back enough calendar days to gather the
+    requested count, keeps the same regular-hours window so sessions stay clean,
+    and returns the most recent `min_bars` bars. Lightweight Charts spaces bars
+    by index, so the overnight gaps between sessions render seamlessly."""
+    im = _IV_MIN.get(interval, 5)
+    per_day = max(1, (end_min - start_min) // im)             # ~84 bars/day @5m
+    trading_days = -(-min_bars // per_day)                    # ceil division
+    cal_days = int(trading_days / 5 * 7) + 7                  # weekends + holidays
+    # Smallest recognised period string covering the calendar span we need.
+    period = next((p for p, d in (("5d", 7), ("1mo", 35), ("3mo", 95),
+                                   ("6mo", 185), ("1y", 400), ("2y", 760))
+                   if d >= cal_days), "5y")
+    bars = _intraday_bars_fallback(ticker, interval=interval, period=period)
+    if bars is None or not len(bars):
+        return None
+    bars = bars.dropna(subset=["close"]).copy()
+    ts = pd.to_datetime(bars["ts"])
+    mins = ts.dt.hour * 60 + ts.dt.minute
+    bars = bars[(mins >= start_min) & (mins <= end_min)]
+    bars = bars.sort_values("ts").reset_index(drop=True)
+    if len(bars) > min_bars:
+        bars = bars.iloc[-min_bars:].reset_index(drop=True)
+    return bars
+
+
 @app.get("/api/net_drift/{ticker}", dependencies=GATED)
 def net_drift(ticker: str):
     """Intraday cumulative premium drift. Two series accrue across the
@@ -756,7 +790,8 @@ def _gexbot_mc_rows(mcd):
 
 @app.get("/api/gexbot/{ticker}", dependencies=GATED)
 def gexbot_chart(ticker: str, category: str = Query("full"),
-                 interval: str = Query("5m")):
+                 interval: str = Query("5m"),
+                 bars: int = Query(1000, ge=100, le=5000)):
     """GexBot Classic data for the Chart view (candles + A + C).
 
     Candles — real intraday price bars from our price feed (latest session),
@@ -775,18 +810,20 @@ def gexbot_chart(ticker: str, category: str = Query("full"),
         except Exception:
             mc = None
 
-        # Real price candles (latest session) from our feed — GexBot has none.
+        # Real price candles from our feed — GexBot serves no OHLC. We pull a
+        # multi-day history (≥ `bars` candles) so the chart has depth, not just
+        # today's session.
         candles = []
         try:
-            bars = _session_bars(ticker, interval=interval, period="1d")
-            if bars is not None and len(bars):
+            px = _history_bars(ticker, interval=interval, min_bars=bars)
+            if px is not None and len(px):
                 candles = [
                     {
                         "time": int(pd.Timestamp(r.ts).timestamp()),
                         "open": _clean(r.open), "high": _clean(r.high),
                         "low": _clean(r.low), "close": _clean(r.close),
                     }
-                    for r in bars.itertuples()
+                    for r in px.itertuples()
                 ]
         except Exception:
             candles = []
@@ -829,7 +866,7 @@ def gexbot_chart(ticker: str, category: str = Query("full"),
         }
 
     try:
-        return _cached(f"gexbot:{ticker}:{category}:{interval}", _compute)
+        return _cached(f"gexbot:{ticker}:{category}:{interval}:{bars}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
