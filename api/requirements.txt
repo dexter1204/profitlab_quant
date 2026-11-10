@@ -4,7 +4,10 @@ numpy>=1.26
 pandas>=2.1
 requests>=2.31
 ijson>=3.2          # streaming JSON parse for GexBot hist/eod (avoids OOM)
-yfinance>=0.2.40
+# Pinned recent: Yahoo changes its API/crumb handling often and old yfinance
+# builds break ("Sin barras intradía"). 0.2.65+ tracks the current handshake;
+# <1 avoids the untested 1.x bump. Bump + redeploy if intraday bars fail again.
+yfinance>=0.2.65,<1
 fastapi>=0.110
 uvicorn[standard]>=0.29
 # auth is delegated to the Aula Virtual API over HTTPS (requests, above) —

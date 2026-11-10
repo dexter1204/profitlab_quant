@@ -256,16 +256,25 @@ def chart(ticker: str,
     def _yf_bars():
         # yfinance serves free (delayed) intraday bars for stocks AND indices
         # (^SPX, ^NDX); used as a fallback so the chart has candles even on an
-        # options-only Polygon plan that can't price stock aggregates.
+        # options-only Polygon/Massive plan that can't price stock aggregates.
         from profitlab.data import yfinance as _yf
         return _yf.intraday_bars(ticker, interval=interval, period=period)
+
+    def _yd_bars():
+        # Last-resort: Yahoo's v8 endpoint directly (no yfinance dependency), so
+        # a broken library build doesn't blank the chart. Best-effort.
+        from profitlab.data import yahoo_direct as _yd
+        return _yd.intraday_bars(ticker, interval=interval, period=period)
 
     def _compute():
         payload = _gamma_payload(ticker, window)
         bars, source = [], None
+        # Massive (the live vendor) first; Yahoo only as a fallback for the
+        # intraday stock/ETF bars an options-only plan can't price.
         loaders = [("vendor", lambda: pdata.intraday_bars(ticker, interval=interval, period=period))]
         if pdata.vendor_name() not in ("yf", "yfinance"):
             loaders.append(("yfinance", _yf_bars))
+        loaders.append(("yahoo", _yd_bars))
         for name, loader in loaders:
             try:
                 df = loader()
@@ -445,7 +454,9 @@ def iv_premium(ticker: str):
         iv_atm = float(by_exp["atm_iv"].iloc[0]) if len(by_exp) else float("nan")
         front = iv_atm
         back = float(by_exp["atm_iv"].iloc[-1]) if len(by_exp) else None
-        closes = pdata.price_history(ticker, period="6mo", interval="1d")
+        closes = _price_history_fallback(ticker, period="6mo", interval="1d")
+        if closes is None or not len(closes):
+            raise RuntimeError("Sin histórico diario para este símbolo/plan.")
         snap = ivmod.snapshot(iv_atm, closes, front_iv=front, back_iv=back)
         return {"ticker": ticker, "spot": _clean(spot),
                 **{k: _clean(v) if isinstance(v, (int, float)) else v
@@ -568,6 +579,25 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
             df = loader()
             if df is not None and len(df):
                 return df
+        except Exception:
+            continue
+    return None
+
+
+def _price_history_fallback(ticker: str, period: str = "6mo", interval: str = "1d"):
+    """Best-effort daily closes: the live vendor (Massive) first, then yfinance.
+    Massive's options-only plan can't price stock/ETF aggregates, so views that
+    need realized-vol history (IV premium) would otherwise 502. yfinance serves
+    free daily closes and is the right fallback here."""
+    loaders = [lambda: pdata.price_history(ticker, period=period, interval=interval)]
+    if pdata.vendor_name() not in ("yf", "yfinance"):
+        from profitlab.data import yfinance as _yf
+        loaders.append(lambda: _yf.price_history(ticker, period=period, interval=interval))
+    for loader in loaders:
+        try:
+            ser = loader()
+            if ser is not None and len(ser):
+                return ser
         except Exception:
             continue
     return None
