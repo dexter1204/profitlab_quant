@@ -1,6 +1,10 @@
 numpy>=1.26
 pandas>=2.1
-yfinance>=0.2.40
+# Pinned to a recent 0.2.x: Yahoo changes its API/crumb handling often and old
+# yfinance builds break ("Sin barras intradía"). 0.2.65+ tracks the current
+# handshake; <1 avoids the untested 1.x major bump. Bump + redeploy if intraday
+# bars start failing again.
+yfinance>=0.2.65,<1
 requests>=2.31
 streamlit>=1.45
 plotly>=5.19

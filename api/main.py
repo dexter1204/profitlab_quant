@@ -550,9 +550,19 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
     """Best-effort intraday bars: try the live vendor, then yfinance (free,
     delayed) for symbols an options-only plan can't price."""
     loaders = [lambda: pdata.intraday_bars(ticker, interval=interval, period=period)]
+    # yfinance library: the maintained free source. It handles Yahoo's
+    # cookie/crumb handshake, so it's the right fallback for ETFs / indices an
+    # options-only plan can't price (QQQ, SPY, ^SPX…). Keep it pinned recent in
+    # requirements.txt — an outdated build (Yahoo API drift) is the usual cause
+    # of "Sin barras intradía" in production.
     if pdata.vendor_name() not in ("yf", "yfinance"):
         from profitlab.data import yfinance as _yf
         loaders.append(lambda: _yf.intraday_bars(ticker, interval=interval, period=period))
+    # Last-resort: hit Yahoo's v8 endpoint directly (no yfinance dependency) so
+    # a broken library build doesn't blank the intraday views when Yahoo is
+    # still serving. Best-effort — backs off cleanly if Yahoo rate-limits it.
+    from profitlab.data import yahoo_direct as _yd
+    loaders.append(lambda: _yd.intraday_bars(ticker, interval=interval, period=period))
     for loader in loaders:
         try:
             df = loader()
