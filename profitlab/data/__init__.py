@@ -33,6 +33,8 @@ import os
 import threading
 import time
 
+import numpy as np
+
 
 def _vendor_module():
     name = os.environ.get("PROFITLAB_VENDOR", "yfinance").lower()
@@ -43,6 +45,10 @@ def _vendor_module():
     elif name in ("polygon_mcp", "polygon-mcp", "api.market", "mcp"):
         from . import polygon_mcp as mod
     elif name in ("demo", "mock", "offline"):
+        # Datos simulados: solo para desarrollo. Bloqueado en producción
+        # (Render define RENDER=true; PROFITLAB_ENV=production también lo bloquea).
+        if os.environ.get("RENDER") or os.environ.get("PROFITLAB_ENV", "").lower() == "production":
+            raise RuntimeError("El proveedor 'demo' (datos simulados) está bloqueado en producción.")
         from . import demo_vendor as mod
     else:
         raise ValueError(
@@ -58,6 +64,16 @@ def vendor_name() -> str:
 
 def spot(ticker: str) -> float:
     return _vendor_module().spot(ticker)
+
+
+def spot_info(ticker: str) -> dict:
+    """Spot + origen: {price, source, estimated}. Los proveedores sin
+    `spot_info` propio devuelven su spot como 'vendor' (no estimado)."""
+    mod = _vendor_module()
+    fn = getattr(mod, "spot_info", None)
+    if fn is not None:
+        return fn(ticker)
+    return {"price": float(mod.spot(ticker)), "source": "vendor", "estimated": False}
 
 
 def price_history(ticker, period="1y", interval="1d"):
@@ -104,16 +120,32 @@ def _chain_ttl() -> float:
         return 90.0
 
 
-def option_chain(ticker, expiries=None, max_expiries=4):
+def _vendor_chain(mod, ticker, expiries, max_expiries, spot, strike_pct):
+    """Llama al option_chain del proveedor pasando spot/strike_pct solo si los admite."""
+    import inspect
+    kw = dict(expiries=expiries, max_expiries=max_expiries)
+    params = inspect.signature(mod.option_chain).parameters
+    if spot is not None and "spot" in params:
+        kw["spot"] = spot
+    if strike_pct is not None and "strike_pct" in params:
+        kw["strike_pct"] = strike_pct
+    return mod.option_chain(ticker, **kw)
+
+
+def option_chain(ticker, expiries=None, max_expiries=4, spot=None, strike_pct=None):
     mod = _vendor_module()
     ttl = _chain_ttl()
     if ttl <= 0:
-        return mod.option_chain(
-            ticker, expiries=expiries, max_expiries=max_expiries
-        )
+        return _vendor_chain(mod, ticker, expiries, max_expiries, spot, strike_pct)
 
     exp_key = tuple(expiries) if expiries else None
-    key = (mod.__name__, str(ticker).upper().strip(), exp_key, max_expiries)
+    # El spot entra redondeado en la clave (paso ≈0.5%) para que ticks mínimos
+    # no invaliden la caché, pero un movimiento real sí recentre la ventana.
+    spot_key = None
+    if spot:
+        step = 10 ** np.floor(np.log10(float(spot) * 0.005))
+        spot_key = round(float(spot) / step) * step
+    key = (mod.__name__, str(ticker).upper().strip(), exp_key, max_expiries, spot_key, strike_pct)
 
     with _CHAIN_LOCK:
         hit = _CHAIN_CACHE.get(key)
@@ -130,9 +162,7 @@ def option_chain(ticker, expiries=None, max_expiries=4):
             hit = _CHAIN_CACHE.get(key)
             if hit and time.monotonic() - hit[0] < ttl:
                 return hit[1].copy()
-        df = mod.option_chain(
-            ticker, expiries=expiries, max_expiries=max_expiries
-        )
+        df = _vendor_chain(mod, ticker, expiries, max_expiries, spot, strike_pct)
         with _CHAIN_LOCK:
             _CHAIN_CACHE[key] = (time.monotonic(), df)
     return df.copy()

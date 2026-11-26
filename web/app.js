@@ -65,7 +65,7 @@
     heatMode: "gex",               // GEX/DEX heatmap table: gex | dex
     spectrumMode: "gex",           // Espectro 3D surface: gex | dex
     regimeMode: "gex",             // Gamma&Flow right column: gex | dex
-    deltaKind: "call",             // delta surface: call | put
+    deltaKind: "net",              // delta surface: net | call | put
     volMode: "drift",              // volatility: drift | surface
     surf3d: true,                  // surfaces: 3D (default) | 2D heatmap
     gexTf: "5m",                   // Chart GexBot: temporalidad de las velas (interval)
@@ -617,22 +617,31 @@
   // diverging scale centered on the panel colour (adapts to light/dark)
   const surfScale = () => [[0, C.red], [0.5, C.panel], [1, C.green]];
   let _dsurfData = null;
+  // Delta Surface = EXPOSICIÓN DELTA REAL de dealers (DEX, USD) por strike ×
+  // vencimiento (API v2026.11). d.z viene como [strike][vencimiento].
   function renderDeltaSurface(d) {
     _dsurfData = d;
     const use3d = state.surf3d && webglOK();
+    const strikes = d.strikes || [], dte = d.dte || [];
+    const Z = dte.map((_, j) => strikes.map((_, i) => {
+      const v = ((d.z || [])[i] || [])[j];
+      return (v == null || !isFinite(v)) ? 0 : v;
+    }));
+    const flat = Z.flat().map(Math.abs).sort((x, y) => x - y);
+    const lim = (flat[Math.floor(flat.length * 0.95)] || 1) * 1.05;
+    const lbl = d.kind === "call" ? "DEX calls" : d.kind === "put" ? "DEX puts" : "Net DEX";
+    const hover = "Strike %{x:,.0f}<br>%{y}D<br>" + lbl + " %{z:$,.3s}<extra></extra>";
     if (use3d) {
       const surf = {
-        type: "surface", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
-        colorscale: surfScale(), cmid: d.kind === "put" ? -0.5 : 0.5,
-        colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
-        hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
+        type: "surface", z: Z, x: strikes, y: dte, colorscale: surfScale(), cmid: 0, cmin: -lim, cmax: lim,
+        colorbar: { title: { text: "DEX", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10, tickformat: "$~s" },
+        hovertemplate: hover,
       };
       const layout = Object.assign({}, BASE_LAYOUT, {
         margin: { l: 0, r: 0, t: 10, b: 0 },
         scene: {
-          dragmode: "turntable",   // arrastrar = rotar (no pan)
-          xaxis: SCENE_AX("Spot"), yaxis: SCENE_AX("Días a vencimiento"),
-          zaxis: SCENE_AX(`${d.kind === "put" ? "Put" : "Call"} Δ`),
+          dragmode: "turntable",
+          xaxis: SCENE_AX("Strike"), yaxis: SCENE_AX("Días a vencimiento"), zaxis: SCENE_AX(lbl + " (USD)"),
           camera: { eye: { x: 1.6, y: -1.5, z: 0.9 } }, aspectratio: { x: 1.3, y: 1, z: 0.7 },
         },
       });
@@ -640,10 +649,9 @@
       return;
     }
     const heat = {
-      type: "heatmap", z: d.z || [], x: d.spot_axis || [], y: d.days_axis || [],
-      colorscale: surfScale(), zmid: d.kind === "put" ? -0.5 : 0.5,
-      colorbar: { title: { text: "Δ", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10 },
-      hovertemplate: "Spot %{x:,.0f}<br>Días %{y:.0f}<br>Δ %{z:.3f}<extra></extra>",
+      type: "heatmap", z: Z, x: strikes, y: dte, colorscale: surfScale(), zmid: 0, zmin: -lim, zmax: lim,
+      colorbar: { title: { text: "DEX", side: "right", font: { size: 9 } }, tickfont: { size: 8 }, thickness: 10, tickformat: "$~s" },
+      hovertemplate: hover,
     };
     const shapes = [];
     if (d.spot != null && isFinite(d.spot)) {
@@ -652,8 +660,7 @@
     }
     const layout = Object.assign({}, BASE_LAYOUT, {
       margin: { l: 60, r: 20, t: 30, b: 44 }, shapes,
-      xaxis: { title: { text: `Spot  ·  ${d.kind === "put" ? "Put" : "Call"} Δ`, font: { size: 10 } },
-        gridcolor: C.grid, tickfont: { size: 10 } },
+      xaxis: { title: { text: `Strike  ·  ${lbl} de dealers`, font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
       yaxis: { title: { text: "Días a vencimiento", font: { size: 10 } }, gridcolor: C.grid, tickfont: { size: 10 } },
     });
     Plotly.react(el("deltaSurf"), [heat], layout, CONFIG);
@@ -1278,7 +1285,7 @@
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
-               path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
+               path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}&v=2`, render: renderDeltaSurface },
     drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
     voldrift:{ plot: "volDrift",   symbolic: true,  path: (s) => `/api/volatility_drift/${s}`,   render: renderVolatilityDrift },
     vp:      { plot: "vpChart",    symbolic: true,  engine: "lwc",  path: (s) => `/api/volume_profile/${s}?bins=48`, render: renderVolumeProfile },
