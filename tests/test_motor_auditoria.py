@@ -481,3 +481,28 @@ def test_cortocircuito_no_repite_llamadas_de_plan_basic():
         with pytest.raises(RuntimeError, match="en pausa"):
             poly.intraday_bars("SPY")                             # misma clase (acciones)
     assert len(calls) == 1
+
+
+def test_paridad_con_la_cadena_recupera_el_spot_real():
+    from profitlab import greeks, iv as ivmod
+    asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    S, r = 7182.78, 0.045
+    rows = []
+    for d in (1, 4, 30):
+        exp = asof + pd.Timedelta(days=d)
+        t = max(d, 1) / 365
+        for k in np.arange(6900, 7450, 25.0):
+            for kind in ("call", "put"):
+                p = float(greeks.price(S, k, t, r, 0.18, 0, kind))
+                rows.append({"strike": k, "expiry": exp, "type": kind, "bid": p - 0.05, "ask": p + 0.05, "last": np.nan})
+    ch = pd.DataFrame(rows)
+    est = ivmod.parity_spot(ch, 7000.0, asof, r=r)        # parte del spot burdo (max OI)
+    assert est == pytest.approx(S, abs=0.5)
+
+
+def test_paridad_sin_pares_suficientes_devuelve_none():
+    from profitlab import iv as ivmod
+    asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    ch = pd.DataFrame({"strike": [7000.0], "expiry": [asof + pd.Timedelta(days=2)], "type": ["call"],
+                       "bid": [10.0], "ask": [11.0], "last": [np.nan]})
+    assert ivmod.parity_spot(ch, 7000.0, asof) is None

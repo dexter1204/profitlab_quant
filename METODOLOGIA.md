@@ -1,6 +1,6 @@
 # Metodología del motor cuantitativo ProfitLab
 
-Versión de cálculo: **`2026.11.26-pro15`** (se devuelve en `meta.calc_version` de cada respuesta).
+Versión de cálculo: **`2026.11.26-pro15b`** (se devuelve en `meta.calc_version` de cada respuesta).
 Todos los cálculos se hacen en este backend; web, iOS y Android solo dibujan lo que devuelve la API, así que las cifras son idénticas en las tres plataformas.
 
 ## Flujo de datos
@@ -58,7 +58,7 @@ Todo el motor trabaja con los datos que da el plan actual, sin contratar nada m�
 **Precio del subyacente (orden de calidad):**
 1. barra de 1 min de hoy (agregados) — precio negociado;
 2. subyacente del snapshot de opciones;
-3. paridad put-call con las cotizaciones de opciones (estimado, mismo retraso que la cadena);
+3. paridad put-call con las cotizaciones de opciones (estimado, mismo retraso que la cadena). Si el spot inicial es burdo (strike con más OI o cierre de ayer), se refina por paridad con la propia cadena cargada (strikes ±4 % de los 2 primeros vencimientos, mediana de `C − P + K·e^(−rT)`) antes de calcular la IV y las griegas (`options_parity_chain`);
 4. cierre de ayer (planes Basic) — estimado y viejo;
 5. strike con más open interest — estimación burda.
 

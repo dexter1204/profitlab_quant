@@ -119,3 +119,35 @@ def fill_from_quotes(chain: pd.DataFrame, spot: float, asof: pd.Timestamp,
     df.attrs.update(chain.attrs)
     df.attrs["iv_missing"] = bool(np.isnan(ivv).all())
     return df, stats
+
+
+def parity_spot(chain: pd.DataFrame, spot_guess: float, asof: pd.Timestamp,
+                r: float = 0.045, band: float = 0.04, max_exp: int = 2) -> Optional[float]:
+    """Spot implícito por paridad put-call con la PROPIA cadena:
+        S = C − P + K·e^(−rT)
+    en strikes a ±`band` del spot estimado, de los `max_exp` primeros
+    vencimientos, solo donde call y put del mismo strike tienen precio
+    (mid bid/ask o último). Devuelve la mediana (robusta a un strike malo)
+    o None si hay menos de 3 pares."""
+    df = chain.copy()
+    bid = pd.to_numeric(df.get("bid"), errors="coerce")
+    ask = pd.to_numeric(df.get("ask"), errors="coerce")
+    mid = (bid + ask) / 2.0
+    df["px"] = mid.where((bid > 0) & (ask > 0) & (ask >= bid)).fillna(pd.to_numeric(df.get("last"), errors="coerce"))
+    df = df[df["px"] > 0]
+    exps = sorted(pd.to_datetime(df["expiry"]).unique())[:max_exp]
+    df = df[pd.to_datetime(df["expiry"]).isin(exps)
+            & (df["strike"] >= spot_guess * (1 - band)) & (df["strike"] <= spot_guess * (1 + band))]
+    piv = df.pivot_table(index=["expiry", "strike"], columns=df["type"].str.lower(),
+                         values="px", aggfunc="mean")
+    if "call" not in piv or "put" not in piv:
+        return None
+    piv = piv.dropna(subset=["call", "put"])
+    if len(piv) < 3:
+        return None
+    exp_idx = pd.to_datetime(piv.index.get_level_values(0))
+    k = piv.index.get_level_values(1).to_numpy(float)
+    t = np.maximum((exp_idx - asof).total_seconds().to_numpy() / 86400.0, 1.0) / 365.0
+    s = piv["call"].to_numpy(float) - piv["put"].to_numpy(float) + k * np.exp(-r * t)
+    s = s[np.isfinite(s) & (s > 0)]
+    return float(np.median(s)) if len(s) >= 3 else None
