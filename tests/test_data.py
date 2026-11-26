@@ -82,10 +82,12 @@ def test_polygon_normalizes_option_chain_snapshot():
     the rest of the library."""
     from profitlab.data import polygon as polygon_mod
 
+    # Vencimiento relativo a hoy: la cadena rechaza (a propósito) contratos vencidos.
+    exp = (pd.Timestamp.now(tz="America/New_York").normalize() + pd.Timedelta(days=10)).strftime("%Y-%m-%d")
     fake_response = {
         "results": [
             {
-                "details": {"strike_price": 740.0, "expiration_date": "2026-09-05",
+                "details": {"strike_price": 740.0, "expiration_date": exp,
                             "contract_type": "call"},
                 "open_interest": 1200,
                 "implied_volatility": 0.245,
@@ -94,7 +96,7 @@ def test_polygon_normalizes_option_chain_snapshot():
                 "day": {"close": 3.20},
             },
             {
-                "details": {"strike_price": 740.0, "expiration_date": "2026-09-05",
+                "details": {"strike_price": 740.0, "expiration_date": exp,
                             "contract_type": "put"},
                 "open_interest": 900,
                 "implied_volatility": 0.28,

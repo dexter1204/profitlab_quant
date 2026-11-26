@@ -126,6 +126,10 @@ def _token(authorization: str | None) -> str | None:
 
 
 def _demo_mode() -> bool:
+    # Nunca en producción: en Render (RENDER=true) o con PROFITLAB_ENV=production
+    # se ignora aunque alguien active PROFITLAB_DEMO por error (abriría la API).
+    if os.environ.get("RENDER") or os.environ.get("PROFITLAB_ENV", "").lower() == "production":
+        return False
     return os.environ.get("PROFITLAB_DEMO", "").strip().lower() in ("1", "true", "yes", "on")
 
 

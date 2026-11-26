@@ -91,3 +91,34 @@ def compute(high, low, close, volume, bins: int = 48, value_area: float = 0.70) 
         "low": lo,
         "high": hi,
     }
+
+
+def nodes(price, volume, hvn_ratio: float = 1.25, lvn_ratio: float = 0.5) -> dict:
+    """Nodos de volumen del perfil.
+
+    Se suaviza el perfil con una media móvil de 3 niveles (reduce el ruido de
+    bins vecinos) y se buscan extremos locales:
+      · HVN (High Volume Node): máximo local con volumen ≥ hvn_ratio × media.
+      · LVN (Low Volume Node):  mínimo local con volumen ≤ lvn_ratio × media,
+        solo ENTRE dos zonas con volumen (los bordes vacíos no son nodos).
+    Devuelve {"hvn": [precios], "lvn": [precios]} ordenados por precio.
+    """
+    p = np.asarray(price, dtype=float)
+    v = np.asarray(volume, dtype=float)
+    n = len(v)
+    if n < 3 or v.sum() <= 0:
+        return {"hvn": [], "lvn": []}
+    k = np.ones(3) / 3.0
+    s = np.convolve(np.pad(v, 1, mode="edge"), k, mode="valid")
+    mean = float(s.mean())
+    hvn, lvn = [], []
+    nz = np.nonzero(v > 0)[0]
+    first, last = (int(nz[0]), int(nz[-1])) if len(nz) else (0, n - 1)
+    for i in range(1, n - 1):
+        if s[i] >= s[i - 1] and s[i] >= s[i + 1] and s[i] >= hvn_ratio * mean:
+            if s[i] > min(s[i - 1], s[i + 1]):
+                hvn.append(float(p[i]))
+        if first < i < last and s[i] <= s[i - 1] and s[i] <= s[i + 1] and s[i] <= lvn_ratio * mean:
+            if s[i] < max(s[i - 1], s[i + 1]):
+                lvn.append(float(p[i]))
+    return {"hvn": hvn, "lvn": lvn}

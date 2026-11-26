@@ -19,9 +19,11 @@ Env vars the server reads (set these in Render → Environment):
 
 from __future__ import annotations
 
+import contextvars
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -38,8 +40,15 @@ from profitlab import data as pdata  # noqa: E402
 from profitlab.data import gexbot as gexbotmod  # noqa: E402  — GexBot Classic API
 from profitlab import dataquality  # noqa: E402
 from profitlab import volume_profile as vpmod  # noqa: E402
+from profitlab import instruments  # noqa: E402
 
 from .aula import require_access  # noqa: E402  — access via the Aula Virtual
+
+# Versión de la metodología de cálculo. Se devuelve en `meta` de cada respuesta
+# para que web/iOS/Android puedan verificar que usan el mismo motor.
+CALC_VERSION = "2026.11.25-auditoria"
+MARKET_TZ = "America/New_York"
+RTH_START, RTH_END = 9 * 60 + 30, 16 * 60   # sesión regular NYSE/Nasdaq (min. del día, hora NY)
 
 
 def _use_vendor_greeks() -> bool:
@@ -93,14 +102,125 @@ _CACHE: dict[str, tuple[float, object]] = {}
 _TTL = float(os.environ.get("PROFITLAB_CACHE_TTL", "30"))  # seconds
 
 
+# ── Metadatos por respuesta ──────────────────────────────────────────────────
+# Cada cálculo registra aquí qué datos usó (instrumento, subyacente, spot y su
+# origen, barras y su frescura, calidad de la cadena, partes estimadas).
+# `_cached` lo adjunta como `meta` a la respuesta: así ningún indicador puede
+# devolver un gráfico sin decir de dónde salió y cuándo.
+_META: contextvars.ContextVar = contextvars.ContextVar("pl_meta", default=None)
+
+
+def _meta() -> dict:
+    m = _META.get()
+    return m if m is not None else {}
+
+
+def _meta_warn(msg: str) -> None:
+    m = _META.get()
+    if m is not None and msg not in m.setdefault("warnings", []):
+        m["warnings"].append(msg)
+
+
+def _meta_estimated(what: str, method: str) -> None:
+    m = _META.get()
+    if m is not None:
+        m.setdefault("estimated", {})[what] = method
+
+
 def _cached(key: str, producer):
     now = time.time()
     hit = _CACHE.get(key)
     if hit and now - hit[0] < _TTL:
-        return hit[1]
-    value = producer()
+        value = hit[1]
+        if isinstance(value, dict) and isinstance(value.get("meta"), dict):
+            value["meta"]["cache_age_s"] = round(now - hit[0], 1)
+        return value
+    token = _META.set({
+        "calc_version": CALC_VERSION,
+        "vendor": pdata.vendor_name(),
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "timezone": MARKET_TZ,
+        "warnings": [],
+        "estimated": {},
+    })
+    try:
+        value = producer()
+        if isinstance(value, dict):
+            meta = dict(_META.get() or {})
+            meta["cache_age_s"] = 0.0
+            # El estado de datos se resume en una sola palabra para la UI.
+            meta["status"] = ("degraded" if meta.get("warnings") else "ok")
+            value["meta"] = meta
+    finally:
+        _META.reset(token)
     _CACHE[key] = (now, value)
     return value
+
+
+# ── Carga de opciones común a todas las vistas ───────────────────────────────
+@dataclass
+class OptCtx:
+    inst: "instruments.Instrument"
+    underlying: str          # subyacente cuya cadena se usó de verdad
+    chain: pd.DataFrame
+    spot: float
+    spot_source: str
+    quality: dict = field(default_factory=dict)
+
+
+def _options(symbol: str, max_expiries: int = 4, strike_pct: float | None = None) -> OptCtx:
+    """Resuelve el instrumento y carga una cadena VÁLIDA (vencimientos vigentes,
+    strikes alrededor del spot, IV presente). Si la del subyacente principal no
+    sirve (p. ej. índice sin datos en el plan), prueba el sustituto y lo
+    declara en `meta`. Nunca devuelve una cadena vieja o sin IV."""
+    inst = instruments.resolve(symbol)
+    candidates = [inst.options] + ([inst.fallback] if inst.fallback else [])
+    errors = []
+    for i, und in enumerate(candidates):
+        try:
+            si = pdata.spot_info(und)
+            spot = float(si["price"])
+            chain = pdata.option_chain(und, max_expiries=max_expiries,
+                                       spot=spot, strike_pct=strike_pct)
+            q = dataquality.assess_chain(chain, spot=spot)
+            if chain.attrs.get("iv_missing"):
+                q["ok"] = False
+                q["issues"] = q.get("issues", []) + ["La fuente no entrega volatilidad implícita."]
+            if not q["ok"]:
+                raise RuntimeError("; ".join(q.get("issues") or ["cadena no válida"]))
+            m = _META.get()
+            if m is not None:
+                exps = sorted(pd.to_datetime(chain["expiry"]).dt.strftime("%Y-%m-%d").unique())
+                m["instrument"] = inst.to_dict()
+                m["options_underlying"] = und
+                m["options_fallback_used"] = i > 0
+                m["spot"] = _clean(spot)
+                m["spot_source"] = si.get("source")
+                m["spot_estimated"] = bool(si.get("estimated"))
+                m["chain"] = {
+                    "contracts": int(len(chain)),
+                    "expiries": exps,
+                    "iv_coverage": q.get("iv_coverage"),
+                    "oi_coverage": q.get("oi_coverage"),
+                    "iv_imputed_pct": round(float(chain["iv_imputed"].mean()) * 100, 1)
+                    if "iv_imputed" in chain.columns else None,
+                    "severity": q.get("severity"),
+                }
+                for w in q.get("warnings", []):
+                    _meta_warn(w)
+                if i > 0:
+                    _meta_warn(f"{inst.options} sin datos válidos ({errors[-1]}); se usa {und}.")
+                if si.get("estimated"):
+                    _meta_warn(f"Spot de {und} estimado desde opciones ({si.get('source')}), "
+                               "no es el precio negociado.")
+                if inst.proxy:
+                    _meta_warn(inst.note)
+            return OptCtx(inst, und, chain, spot, si.get("source", ""), q)
+        except Exception as e:  # noqa: BLE001 — se reintenta con el sustituto
+            errors.append(f"{und}: {e}")
+            continue
+    raise RuntimeError("Sin datos de opciones válidos para "
+                       f"{inst.symbol}: " + " | ".join(errors))
 
 
 # Separate long-lived cache for the GexBot hist/eod download (a ~30MB ZIP that
@@ -153,8 +273,8 @@ def health(probe: str = Query(None, description="optional ticker to probe the li
     if probe:
         t = probe.upper().strip()
         try:
-            chain = pdata.option_chain(t, max_expiries=2)
-            spot = pdata.spot(t)
+            oc = _options(t, max_expiries=2)
+            chain, spot = oc.chain, oc.spot
             rep = dataquality.assess_chain(chain, spot=spot)
             # crude freshness read: does the chain carry live quotes?
             has_quotes = bool(
@@ -181,8 +301,8 @@ def _strike_step(strikes) -> float:
 
 def _gamma_payload(ticker: str, window: int) -> dict:
     """Core Gamma & Flow computation shared by /analyze and /chart."""
-    chain = pdata.option_chain(ticker)
-    spot = pdata.spot(ticker)
+    oc = _options(ticker)
+    chain, spot = oc.chain, oc.spot
     ctx = _ctx(spot)
     health = dataquality.assess_chain(chain, spot=spot, asof=ctx.asof)
     gex = exposures.gex_by_strike(chain, ctx)
@@ -305,8 +425,8 @@ def flow(ticker: str, top: int = Query(15, ge=5, le=40)):
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker)
+        chain, spot = oc.chain, oc.spot
         df = chain.copy()
         # best per-contract price: quote mid, else day close/last
         bid = pd.to_numeric(df.get("bid"), errors="coerce")
@@ -363,8 +483,8 @@ def oi(ticker: str, window: int = Query(20, ge=5, le=60)):
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker)
+        chain, spot = oc.chain, oc.spot
         tbl = (chain.groupby(["strike", "type"], as_index=False)["oi"].sum()
                .pivot(index="strike", columns="type", values="oi").fillna(0.0))
         if "call" not in tbl:
@@ -401,8 +521,8 @@ def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60),
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker, max_expiries=exp)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker, max_expiries=exp)
+        chain, spot = oc.chain, oc.spot
         asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
         ctx = _ctx(spot, asof)
 
@@ -411,8 +531,14 @@ def gex_heatmap(ticker: str, window: int = Query(18, ge=5, le=60),
         step = _strike_step(gex_grid["strike"])
         lo, hi = spot - window * step, spot + window * step
 
+        in_win = gex_grid[(gex_grid["strike"] >= lo) & (gex_grid["strike"] <= hi)]
+        width = _bucket_width(in_win["strike"])
+        if width:
+            _meta()["strike_bucket"] = width
+
         def _pivot(grid, col):
             g = grid[(grid["strike"] >= lo) & (grid["strike"] <= hi)]
+            g = _bucket(g, col, width)
             wide = g.pivot(index="strike", columns="expiry", values=col).sort_index()
             return wide.reindex(sorted(wide.columns), axis=1)
 
@@ -448,8 +574,8 @@ def iv_premium(ticker: str):
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker)
+        chain, spot = oc.chain, oc.spot
         by_exp = exposures.iv_by_expiry(chain, spot)
         iv_atm = float(by_exp["atm_iv"].iloc[0]) if len(by_exp) else float("nan")
         front = iv_atm
@@ -507,8 +633,9 @@ def market_heatmap():
         raise HTTPException(status_code=502, detail=str(e))
 
 
-def _atm_iv(chain, spot) -> float:
-    """Front-expiry ATM implied vol, with a sane fallback."""
+def _atm_iv(chain, spot) -> float | None:
+    """IV ATM del primer vencimiento. Si no hay IV real devuelve None (antes
+    devolvía un 20 % fijo que se mostraba como si fuera dato)."""
     try:
         by_exp = exposures.iv_by_expiry(chain, spot)
         if len(by_exp):
@@ -517,50 +644,99 @@ def _atm_iv(chain, spot) -> float:
                 return v
     except Exception:
         pass
-    return 0.20
+    return None
+
+
+def _bucket_width(strikes, max_rows: int = 40) -> float | None:
+    """Ancho de tramo "redondo" para que la rejilla tenga ≤ max_rows strikes.
+    En índices (SPX, NDX) el open interest se concentra en strikes redondos y
+    los intermedios casi no tienen contratos: sin agrupar, la superficie sale
+    en dientes de sierra. Agrupar SUMA la exposición de cada tramo (no inventa
+    ni suaviza datos). None = no hace falta agrupar."""
+    ks = np.sort(np.unique(np.asarray(strikes, dtype=float)))
+    if len(ks) <= max_rows:
+        return None
+    base = _strike_step(ks)
+    raw = (ks[-1] - ks[0]) / max_rows
+    for m in (1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500):
+        w = base * m
+        if w >= raw:
+            return float(w)
+    return float(raw)
+
+
+def _bucket(grid: pd.DataFrame, col: str, width: float | None) -> pd.DataFrame:
+    if not width:
+        return grid
+    g = grid.copy()
+    g["strike"] = np.round(g["strike"] / width) * width
+    return g.groupby(["strike", "expiry"], as_index=False)[col].sum()
 
 
 @app.get("/api/delta_surface/{ticker}", dependencies=GATED)
 def delta_surface(ticker: str,
-                  kind: str = Query("call"),
-                  days: int = Query(60, ge=7, le=180)):
-    """Black-Scholes delta over a (spot × time-to-expiry) grid at the ATM
-    strike — the Delta Surface 3-D view."""
+                  kind: str = Query("net"),
+                  exp: int = Query(8, ge=2, le=12),
+                  window: int = Query(24, ge=5, le=60)):
+    """Delta Surface = EXPOSICIÓN DELTA REAL de los dealers (DEX) por
+    strike × vencimiento, construida con el open interest de la cadena.
+
+    Metodología (v2026.11): para cada contrato
+        DEX = signo_dealer × delta_BS(spot, K, T, r, IV_contrato) × OI × 100 × spot
+    con signo_dealer = −1 en calls (dealer corto call) y +1 en puts (dealer
+    largo put), y se suma por (strike, vencimiento). Unidades: USD de delta
+    (variación del valor de la cobertura por $1 del subyacente × spot).
+    `kind`: net (calls + puts) | call | put.
+
+    Sustituye a la versión anterior, que dibujaba el delta TEÓRICO de una
+    opción hipotética ATM sobre una rejilla de precio: por construcción era
+    casi idéntica en todos los activos y no usaba open interest."""
     ticker = ticker.upper().strip()
     kind = kind.lower().strip()
-    if kind not in ("call", "put"):
-        kind = "call"
+    if kind not in ("net", "call", "put"):
+        kind = "net"
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
-        ctx = exposures.ChainContext(
-            spot=spot,
-            asof=pd.Timestamp.now("UTC").tz_localize(None).normalize(),
-        )
-        iv = _atm_iv(chain, spot)
-        spot_axis, days_axis, grid = exposures.delta_surface(
-            ctx, strike=spot, iv=iv, days_max=days, kind=kind,
-        )
-        z = [[_clean(v) for v in row] for row in grid]  # (n_time, n_spot)
+        oc = _options(ticker, max_expiries=exp)
+        chain, spot = oc.chain, oc.spot
+        if kind != "net":
+            chain = chain[chain["type"].str.lower() == kind]
+        if chain["oi"].fillna(0).sum() <= 0:
+            raise RuntimeError("La cadena no trae open interest: no se puede calcular exposición.")
+        asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+        grid = exposures.dex_by_strike_expiry(chain, _ctx(spot, asof))
+        step = _strike_step(grid["strike"])
+        lo, hi = spot - window * step, spot + window * step
+        g = grid[(grid["strike"] >= lo) & (grid["strike"] <= hi)]
+        width = _bucket_width(g["strike"])
+        g = _bucket(g, "dex", width)
+        if width:
+            _meta()["strike_bucket"] = width
+        wide = g.pivot(index="strike", columns="expiry", values="dex").sort_index()
+        wide = wide.reindex(sorted(wide.columns), axis=1)
+        if wide.shape[0] < 3 or wide.shape[1] < 1:
+            raise RuntimeError("Datos insuficientes para la superficie (pocos strikes/vencimientos).")
+        _meta()["method"] = "dealer_dex_by_strike_expiry"
         return {
             "ticker": ticker, "spot": _clean(spot), "kind": kind,
-            "iv": _clean(iv),
-            "spot_axis": [float(s) for s in spot_axis],
-            "days_axis": [float(d) for d in days_axis],
-            "z": z,
+            "unit": "USD delta",
+            "strikes": [float(s) for s in wide.index],
+            "expiries": [pd.Timestamp(c).strftime("%Y-%m-%d") for c in wide.columns],
+            "dte": [int(max((pd.Timestamp(c) - asof).days, 0)) for c in wide.columns],
+            "z": [[_clean(v) for v in row] for row in wide.to_numpy()],  # [strike][vencimiento]
+            "total_dex": _clean(float(np.nansum(wide.to_numpy()))),
         }
 
     try:
-        return _cached(f"dsurf:{ticker}:{kind}:{days}", _compute)
+        return _cached(f"dsurf:{ticker}:{kind}:{exp}:{window}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 
 def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d"):
-    """Best-effort intraday bars: try the live vendor, then yfinance (free,
-    delayed) for symbols an options-only plan can't price."""
-    loaders = [lambda: pdata.intraday_bars(ticker, interval=interval, period=period)]
+    """Barras intradía (ts en hora de Nueva York): proveedor principal y, si no
+    las entrega, yfinance y Yahoo directo. Registra en `meta` qué fuente sirvió."""
+    loaders = [("vendor", lambda: pdata.intraday_bars(ticker, interval=interval, period=period))]
     # yfinance library: the maintained free source. It handles Yahoo's
     # cookie/crumb handshake, so it's the right fallback for ETFs / indices an
     # options-only plan can't price (QQQ, SPY, ^SPX…). Keep it pinned recent in
@@ -568,19 +744,31 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
     # of "Sin barras intradía" in production.
     if pdata.vendor_name() not in ("yf", "yfinance"):
         from profitlab.data import yfinance as _yf
-        loaders.append(lambda: _yf.intraday_bars(ticker, interval=interval, period=period))
+        loaders.append(("yfinance", lambda: _yf.intraday_bars(ticker, interval=interval, period=period)))
     # Last-resort: hit Yahoo's v8 endpoint directly (no yfinance dependency) so
     # a broken library build doesn't blank the intraday views when Yahoo is
     # still serving. Best-effort — backs off cleanly if Yahoo rate-limits it.
     from profitlab.data import yahoo_direct as _yd
-    loaders.append(lambda: _yd.intraday_bars(ticker, interval=interval, period=period))
-    for loader in loaders:
+    loaders.append(("yahoo", lambda: _yd.intraday_bars(ticker, interval=interval, period=period)))
+    errors = []
+    for name, loader in loaders:
         try:
             df = loader()
             if df is not None and len(df):
+                m = _META.get()
+                if m is not None:
+                    m["bars_source"] = name if name != "vendor" else pdata.vendor_name()
+                if name != "vendor":
+                    _meta_warn(f"Barras de {ticker} desde {name} (respaldo gratuito, "
+                               "puede tener retraso) porque el proveedor principal no las entrega.")
                 return df
-        except Exception:
+            errors.append(f"{name}: vacío")
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}: {str(e)[:80]}")
             continue
+    m = _META.get()
+    if m is not None:
+        m["bars_errors"] = errors
     return None
 
 
@@ -603,23 +791,76 @@ def _price_history_fallback(ticker: str, period: str = "6mo", interval: str = "1
     return None
 
 
-def _session_bars(ticker: str, start_min: int = 8 * 60, end_min: int = 15 * 60,
-                  interval: str = "1m", period: str = "1d"):
-    """Latest trading session's intraday bars, restricted to the regular
-    window (default 08:00–15:00). Both the Net Drift and Volatility Drift views
-    are intraday, so this keeps them to one clean session (no overnight /
-    extended-hours tail, no multi-day zig-zag). `interval` lets the Replay view
-    pick a coarser bar (e.g. 5m) while the drift views keep the 1m default."""
-    bars = _intraday_bars_fallback(ticker, interval=interval, period=period)
-    if bars is None or not len(bars):
-        return None
-    bars = bars.dropna(subset=["close"]).copy()
-    ts = pd.to_datetime(bars["ts"])
-    bars = bars[ts.dt.normalize() == ts.dt.normalize().max()]   # latest day only
+def _clean_bars(bars: pd.DataFrame) -> pd.DataFrame:
+    """Validación de barras: sin cierres nulos, sin timestamps duplicados,
+    en orden cronológico y sin OHLC incoherente (high < low)."""
+    b = bars.dropna(subset=["close"]).copy()
+    b["ts"] = pd.to_datetime(b["ts"])
+    n0 = len(b)
+    b = b.drop_duplicates(subset="ts", keep="last").sort_values("ts")
+    if len(b) < n0:
+        _meta_warn(f"Se descartaron {n0 - len(b)} barras duplicadas.")
+    bad = (b["high"] < b["low"])
+    if bad.any():
+        _meta_warn(f"Se descartaron {int(bad.sum())} barras con high < low.")
+        b = b[~bad]
+    return b.reset_index(drop=True)
+
+
+def _rth(bars: pd.DataFrame, start_min: int = RTH_START, end_min: int = RTH_END) -> pd.DataFrame:
     ts = pd.to_datetime(bars["ts"])
     mins = ts.dt.hour * 60 + ts.dt.minute
-    bars = bars[(mins >= start_min) & (mins <= end_min)]
-    return bars.sort_values("ts").reset_index(drop=True)
+    return bars[(mins >= start_min) & (mins < end_min)]
+
+
+def _check_fresh(bars: pd.DataFrame) -> None:
+    """Marca datos congelados: con el mercado abierto, la última barra no debe
+    tener más de 20 min de antigüedad."""
+    if not len(bars):
+        return
+    now = pd.Timestamp.now(tz=MARKET_TZ).tz_localize(None)
+    last = pd.Timestamp(bars["ts"].iloc[-1])
+    m = _META.get()
+    if m is not None:
+        m["bars_last_ts"] = last.isoformat()
+        m["bars_session"] = last.strftime("%Y-%m-%d")
+    open_now = now.weekday() < 5 and RTH_START <= now.hour * 60 + now.minute < RTH_END
+    if open_now and last.date() == now.date():
+        age = (now - last).total_seconds() / 60
+        if age > 20:
+            _meta_warn(f"Datos desactualizados: la última barra tiene {age:.0f} min con el mercado abierto.")
+    elif open_now:
+        _meta_warn("Mercado abierto pero sin barras de hoy: se muestra la sesión anterior.")
+
+
+def _session_bars(ticker: str, start_min: int = RTH_START, end_min: int = RTH_END,
+                  interval: str = "1m", period: str = "5d"):
+    """Barras de la ÚLTIMA SESIÓN REGULAR (09:30–16:00 hora de Nueva York) del
+    símbolo de barras del instrumento (los índices y CFD usan su ETF, que sí
+    tiene volumen). Antes la ventana era 08:00–15:00 sobre timestamps en UTC
+    (Massive) o en hora local (Yahoo): con Massive se quedaba con el
+    premercado y desde las 19:00 de NY la ventana salía vacía."""
+    inst = instruments.resolve(ticker)
+    sym = inst.bars
+    if not sym:
+        raise RuntimeError(f"{inst.symbol} no tiene un subyacente con barras/volumen.")
+    m = _META.get()
+    if m is not None:
+        m["instrument"] = m.get("instrument") or inst.to_dict()
+        m["bars_symbol"] = sym
+        m["bars_interval"] = interval
+    if sym != inst.symbol and inst.proxy:
+        _meta_warn(inst.note)
+    raw = _intraday_bars_fallback(sym, interval=interval, period=period)
+    if raw is None or not len(raw):
+        return None
+    bars = _rth(_clean_bars(raw), start_min, end_min)
+    if not len(bars):
+        return None
+    days = pd.to_datetime(bars["ts"]).dt.normalize()
+    bars = bars[days == days.max()].reset_index(drop=True)   # última sesión con datos
+    _check_fresh(bars)
+    return bars
 
 
 # Minutes per bar, for sizing the history window of _history_bars.
@@ -628,7 +869,7 @@ _IV_MIN = {"1m": 1, "2m": 2, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
 
 
 def _history_bars(ticker: str, interval: str = "5m", min_bars: int = 1000,
-                  start_min: int = 8 * 60, end_min: int = 15 * 60):
+                  start_min: int = RTH_START, end_min: int = RTH_END):
     """Multi-day intraday bars for the GexBot chart: at least `min_bars`
     regular-hours candles. Unlike `_session_bars` (latest day only, for the
     intraday drift views), this reaches back enough calendar days to gather the
@@ -657,20 +898,23 @@ def _history_bars(ticker: str, interval: str = "5m", min_bars: int = 1000,
 
 
 @app.get("/api/net_drift/{ticker}", dependencies=GATED)
-def net_drift(ticker: str):
-    """Intraday cumulative premium drift. Two series accrue across the
-    session — traded call premium (converging on the day's total call $
-    notional) and put premium (converging on the put $ notional, drawn
-    negative) — with the underlying price overlaid on a second axis. Call
-    premium accrues on up / high-volume bars, put premium on down bars, so
-    the curves track where money actually moved during the day."""
+def net_drift(ticker: str, exp: int = Query(12, ge=1, le=20)):
+    """Net Drift (metodología ProfitLab, conservada):
+      · TOTALES REALES: prima negociada hoy en calls y en puts
+            notional = volumen_día × precio_contrato (mid, o último) × 100
+        sumada sobre los `exp` vencimientos más cercanos y strikes ±25 % del spot
+        (antes: 4 vencimientos y tope de 500 contratos → total infravalorado).
+      · CURVA INTRADÍA ESTIMADA: el proveedor no da operaciones de opciones con
+        hora, así que el total se reparte por minuto con
+            w_call(t) ∝ volumen_barra(t) × (0.5 + 0.5·tanh(r_t / (1.2·σ_r)))
+            w_put(t)  ∝ volumen_barra(t) × (1 − ...)
+        y se acumula. La forma de la curva es un modelo, no flujo observado;
+        el punto final sí es el total real. `meta.estimated` lo declara."""
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
-
-        # Day call / put $ notional from the chain (traded vol × price × 100).
+        oc = _options(ticker, max_expiries=exp, strike_pct=0.25)
+        chain, spot = oc.chain, oc.spot
         df = chain.copy()
         bid = pd.to_numeric(df.get("bid"), errors="coerce")
         ask = pd.to_numeric(df.get("ask"), errors="coerce")
@@ -681,10 +925,13 @@ def net_drift(ticker: str):
         is_call = df["type"].str.lower() == "call"
         call_tot = float(notional[is_call].sum())
         put_tot = float(notional[~is_call].sum())
+        if call_tot + put_tot <= 0:
+            raise RuntimeError("La cadena no trae volumen negociado hoy (mercado cerrado o "
+                               "plan sin volumen de opciones): no hay prima que acumular.")
 
-        bars = _session_bars(ticker)   # latest session, 08:00–15:00 only
+        bars = _session_bars(ticker)
         if bars is None or not len(bars):
-            raise RuntimeError("Sin barras intradía para este símbolo/plan.")
+            raise RuntimeError("Sin barras intradía de la sesión regular para este instrumento.")
         close = bars["close"].to_numpy(dtype=float)
         volb = pd.to_numeric(bars.get("volume", 1.0), errors="coerce").fillna(0.0).to_numpy(dtype=float)
         n = len(close)
@@ -699,6 +946,8 @@ def net_drift(ticker: str):
         pw = pw / pw.sum() if pw.sum() > 0 else np.ones(n) / n
         call_drift = call_tot * np.cumsum(cw)
         put_drift = -put_tot * np.cumsum(pw)
+        _meta_estimated("curve", "reparto del total diario por volumen×dirección de cada barra")
+        _meta()["method"] = "net_drift_v1_totales_reales_curva_estimada"
 
         t = [pd.Timestamp(x).strftime("%H:%M") for x in bars["ts"]]
         return {
@@ -706,43 +955,88 @@ def net_drift(ticker: str):
             "call_drift": [_clean(v) for v in call_drift],
             "put_drift": [_clean(v) for v in put_drift],
             "price": [_clean(v) for v in close],
+            "price_symbol": instruments.resolve(ticker).bars,
             "totals": {
                 "call_drift": _clean(call_tot),
                 "put_drift": _clean(-put_tot),
+                "net": _clean(call_tot - put_tot),
                 "last": _clean(close[-1]),
             },
         }
 
     try:
-        return _cached(f"drift:{ticker}", _compute)
+        return _cached(f"drift:{ticker}:{exp}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 
+def _multi_session_bars(ticker: str, sessions: int):
+    """Últimas `sessions` sesiones regulares (barras de 1m para 1 sesión, 5m
+    para varias) del símbolo con volumen del instrumento."""
+    if sessions <= 1:
+        return _session_bars(ticker)
+    inst = instruments.resolve(ticker)
+    if not inst.bars:
+        raise RuntimeError(f"{inst.symbol} no tiene un subyacente con volumen.")
+    m = _META.get()
+    if m is not None:
+        m["instrument"] = m.get("instrument") or inst.to_dict()
+        m["bars_symbol"] = inst.bars
+        m["bars_interval"] = "5m"
+    if inst.proxy:
+        _meta_warn(inst.note)
+    period = "1mo" if sessions <= 15 else "3mo"
+    raw = _intraday_bars_fallback(inst.bars, interval="5m", period=period)
+    if raw is None or not len(raw):
+        return None
+    bars = _rth(_clean_bars(raw))
+    days = pd.to_datetime(bars["ts"]).dt.normalize()
+    keep = sorted(days.unique())[-sessions:]
+    bars = bars[days.isin(keep)].reset_index(drop=True)
+    _check_fresh(bars)
+    return bars
+
+
 @app.get("/api/volume_profile/{ticker}", dependencies=GATED)
-def volume_profile(ticker: str, bins: int = Query(48, ge=10, le=160)):
-    """Volume Profile (volumen por precio) de la última sesión intradía
-    (08:00–15:00). Reparte el volumen de cada barra entre los niveles de precio
-    que abarcó y devuelve el histograma + POC / VAH / VAL, junto con las velas
-    para dibujar precio y perfil en el mismo gráfico (TradingView)."""
+def volume_profile(ticker: str, bins: int = Query(48, ge=10, le=160),
+                   sessions: int = Query(1, ge=1, le=30),
+                   value_area: float = Query(0.70, ge=0.5, le=0.95)):
+    """Volume Profile de las últimas `sessions` sesiones regulares
+    (1 = sesión/día, 5 = semana, N = rango personalizado en sesiones).
+
+    Es una ESTIMACIÓN DESDE VELAS OHLCV: el volumen de cada vela se reparte de
+    forma uniforme entre los niveles de precio de su rango [low, high]. El
+    proveedor no entrega volumen negociado en cada precio (tick a tick), y la
+    respuesta lo declara en `meta.estimated`. Devuelve POC, VAH, VAL y nodos
+    de alto (HVN) y bajo volumen (LVN). Índices y CFD usan su ETF (los
+    índices no tienen volumen)."""
     ticker = ticker.upper().strip()
 
     def _compute():
-        bars = _session_bars(ticker)
+        bars = _multi_session_bars(ticker, sessions)
         if bars is None or not len(bars):
-            raise RuntimeError("Sin barras intradía para este símbolo/plan.")
+            raise RuntimeError("Sin barras intradía de la sesión regular para este instrumento.")
         vol = pd.to_numeric(bars.get("volume", 0.0), errors="coerce").fillna(0.0)
+        if float(vol.sum()) <= 0:
+            raise RuntimeError("Las barras no traen volumen: no se puede construir el perfil.")
         vp = vpmod.compute(
             bars["high"].to_numpy(dtype=float),
             bars["low"].to_numpy(dtype=float),
             bars["close"].to_numpy(dtype=float),
             vol.to_numpy(dtype=float),
-            bins=bins,
+            bins=bins, value_area=value_area,
         )
+        vp.update(vpmod.nodes(vp["price"], vp["volume"]))
         vp["ticker"] = ticker
-        vp["spot"] = _clean(pdata.spot(ticker))
-        # Velas con timestamp UNIX (segundos) — lo que Lightweight Charts espera
-        # para intradía.
+        vp["symbol"] = instruments.resolve(ticker).bars
+        vp["sessions"] = sessions
+        vp["spot"] = _clean(float(bars["close"].iloc[-1]))
+        vp["range_start"] = pd.Timestamp(bars["ts"].iloc[0]).isoformat()
+        vp["range_end"] = pd.Timestamp(bars["ts"].iloc[-1]).isoformat()
+        _meta_estimated("volume_by_price", "reparto uniforme del volumen de cada vela OHLCV en su rango")
+        _meta()["method"] = "volume_profile_ohlcv_v1"
+        # Velas con timestamp UNIX: el ts es hora de NY sin zona; Lightweight
+        # Charts muestra UTC, así que el eje enseña el reloj del mercado.
         vp["candles"] = [
             {
                 "time": int(pd.Timestamp(r.ts).timestamp()),
@@ -754,32 +1048,40 @@ def volume_profile(ticker: str, bins: int = Query(48, ge=10, le=160)):
         return vp
 
     try:
-        return _cached(f"vp:{ticker}:{bins}", _compute)
+        return _cached(f"vp:{ticker}:{bins}:{sessions}:{value_area}", _compute)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/api/levels_chart/{ticker}", dependencies=GATED)
 def levels_chart(ticker: str, window: int = Query(24, ge=5, le=60)):
-    """Velas intradía (08:00–15:00) + niveles gamma/delta (call wall, put wall,
-    gamma flip, delta wall, major neg delta, max pain) para dibujarlos como
-    líneas horizontales sobre el gráfico (TradingView). Se refresca con el
-    auto-refresh del dashboard → niveles "en vivo"."""
+    """Velas de la sesión regular + niveles gamma/delta (call wall, put wall,
+    gamma flip, delta wall, major neg delta, max pain) como líneas. Las velas
+    son del MISMO subyacente cuyas opciones dan los niveles (antes, en índices,
+    niveles del índice sobre velas del ETF quedaban fuera de escala)."""
     ticker = ticker.upper().strip()
 
     def _compute():
         payload = _gamma_payload(ticker, window)
-        bars = _session_bars(ticker)
+        und = _meta().get("options_underlying") or ticker
+        raw = _intraday_bars_fallback(und, interval="1m", period="5d")
         candles = []
-        if bars is not None and len(bars):
-            candles = [
-                {
-                    "time": int(pd.Timestamp(r.ts).timestamp()),
-                    "open": _clean(r.open), "high": _clean(r.high),
-                    "low": _clean(r.low), "close": _clean(r.close),
-                }
-                for r in bars.itertuples()
-            ]
+        if raw is not None and len(raw):
+            bars = _rth(_clean_bars(raw))
+            if len(bars):
+                days = pd.to_datetime(bars["ts"]).dt.normalize()
+                bars = bars[days == days.max()]
+                _check_fresh(bars)
+                candles = [
+                    {
+                        "time": int(pd.Timestamp(r.ts).timestamp()),
+                        "open": _clean(r.open), "high": _clean(r.high),
+                        "low": _clean(r.low), "close": _clean(r.close),
+                    }
+                    for r in bars.itertuples()
+                ]
+        if not candles:
+            _meta_warn(f"Sin velas intradía de {und}: se muestran solo los niveles.")
         return {
             "ticker": ticker,
             "spot": payload.get("spot"),
@@ -957,30 +1259,46 @@ def gexbot_replay(ticker: str,
 
 @app.get("/api/volatility_drift/{ticker}", dependencies=GATED)
 def volatility_drift(ticker: str, window: int = Query(20, ge=5, le=60)):
-    """Volatility Drift (INTRADAY, 08:00–15:00 session): realized vol (ARV =
-    annualized rolling realized volatility from minute returns), the current
-    ATM implied-vol level, and the underlying price on one time axis. Shows
-    whether the stock is actually moving more/less than options price in."""
+    """Volatility Drift (metodología ProfitLab, conservada), sesión regular:
+        r_t   = ln(C_t / C_{t-1})                      (velas de 1 minuto)
+        ARV_t = std_muestral(r_{t-window+1..t}) × √(252 × 390) × 100   [% anual]
+    frente a la IV ATM del primer vencimiento (en %). Mide si el subyacente se
+    mueve más (ARV > IV) o menos de lo que descuentan las opciones.
+    Añadido (no cambia la fórmula): dirección y magnitud del drift = cambio
+    del ARV en la última ventana, y diferencia ARV − IV.
+    Sin IV real, `iv` = null (antes: 20 % fijo presentado como dato)."""
     ticker = ticker.upper().strip()
 
     def _compute():
-        bars = _session_bars(ticker)   # latest session, 08:00–15:00
+        bars = _session_bars(ticker)
         if bars is None or len(bars) < window + 2:
-            raise RuntimeError("Sin barras intradía suficientes para la volatilidad.")
+            n = 0 if bars is None else len(bars)
+            raise RuntimeError(f"Datos insuficientes: {n} barras en la sesión y la ventana "
+                               f"necesita al menos {window + 2}.")
         close = bars["close"].to_numpy(dtype=float)
-        s = pd.Series(close)
-        logret = np.log(s / s.shift(1))
-        # annualize minute-bar vol: 252 trading days × 390 regular-session mins
+        s_ = pd.Series(close)
+        logret = np.log(s_ / s_.shift(1))
         ann = np.sqrt(252 * 390)
         arv = (logret.rolling(window).std(ddof=1) * ann * 100.0).to_numpy()
+        valid = arv[np.isfinite(arv)]
+        if len(valid) < 2 or np.nanmax(valid) == 0:
+            raise RuntimeError("El precio no se movió en la sesión: la volatilidad realizada es cero.")
 
         iv_atm = None
         try:
-            chain = pdata.option_chain(ticker)
-            spot = pdata.spot(ticker)
-            iv_atm = _atm_iv(chain, spot) * 100.0
-        except Exception:
-            iv_atm = None
+            oc = _options(ticker)
+            v = _atm_iv(oc.chain, oc.spot)
+            iv_atm = v * 100.0 if v is not None else None
+        except Exception as e:  # noqa: BLE001
+            _meta_warn(f"Sin IV implícita: {str(e)[:120]}")
+        if iv_atm is None:
+            _meta_warn("IV ATM no disponible: solo se muestra la volatilidad realizada.")
+
+        last = float(valid[-1])
+        prev = float(valid[-window]) if len(valid) > window else float(valid[0])
+        change = last - prev
+        direction = "up" if change > 0.5 else ("down" if change < -0.5 else "flat")
+        _meta()["method"] = "arv_rolling_1m_v1"
 
         t = [pd.Timestamp(x).strftime("%H:%M") for x in bars["ts"]]
         return {
@@ -988,8 +1306,16 @@ def volatility_drift(ticker: str, window: int = Query(20, ge=5, le=60)):
             "window": window,
             "t": t,
             "price": [_clean(v) for v in close],
+            "price_symbol": instruments.resolve(ticker).bars,
             "arv": [_clean(v) for v in arv],
             "iv": _clean(iv_atm),
+            "summary": {
+                "arv_last": _clean(last),
+                "drift_change": _clean(change),       # puntos de vol en la última ventana
+                "direction": direction,
+                "spread_vs_iv": _clean(last - iv_atm) if iv_atm is not None else None,
+                "window_minutes": window,
+            },
         }
 
     try:
@@ -1005,8 +1331,8 @@ def vol_drift(ticker: str):
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker)
+        chain, spot = oc.chain, oc.spot
         df = exposures.iv_by_expiry(chain, spot)
         return {
             "ticker": ticker, "spot": _clean(spot),
@@ -1030,8 +1356,8 @@ def vol_surface(ticker: str, window: int = Query(18, ge=5, le=60)):
     ticker = ticker.upper().strip()
 
     def _compute():
-        chain = pdata.option_chain(ticker)
-        spot = pdata.spot(ticker)
+        oc = _options(ticker)
+        chain, spot = oc.chain, oc.spot
         grid = exposures.iv_surface(chain, spot, strike_window=window)
         wide = (grid.pivot(index="strike", columns="expiry", values="iv")
                 .sort_index())

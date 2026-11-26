@@ -155,26 +155,34 @@ def _spot_from_parity(results: list[dict], r: float = 0.045) -> Optional[float]:
 
 
 def _spot_from_options(ticker: str) -> Optional[float]:
+    return _spot_from_options_src(ticker)[0]
+
+
+def _spot_from_options_src(ticker: str) -> tuple[Optional[float], str]:
     """Underlying spot on an Options-only plan, in order of accuracy:
       1. underlying_asset.price from the snapshot (the real delayed price)
       2. put-call parity across the front expiry (options-implied spot)
       3. max-OI strike (≈ ATM) as a last-resort proxy
-    Never touches a stocks endpoint."""
+    Never touches a stocks endpoint. Solo vencimientos vigentes (antes podía
+    leer contratos ya vencidos)."""
     try:
-        data = _get(f"/v3/snapshot/options/{ticker.upper()}", {"limit": 250})
+        data = _get(f"/v3/snapshot/options/{ticker.upper()}", {
+            "limit": 250, "expiration_date.gte": _today_ny().isoformat(),
+            "sort": "expiration_date", "order": "asc",
+        })
     except RuntimeError:
-        return None
+        return None, ""
     results = data.get("results", [])
 
     for opt in results:
         ua = opt.get("underlying_asset") or {}
         px = ua.get("price") or ua.get("value")
         if px and float(px) > 0:
-            return float(px)
+            return float(px), "options_underlying"
 
     parity = _spot_from_parity(results)
     if parity and parity > 0:
-        return parity
+        return parity, "options_parity"
 
     oi_by_strike: dict[float, float] = {}
     for opt in results:
@@ -186,8 +194,8 @@ def _spot_from_options(ticker: str) -> Optional[float]:
             opt.get("open_interest") or 0.0
         )
     if oi_by_strike:
-        return max(oi_by_strike.items(), key=lambda kv: kv[1])[0]
-    return None
+        return max(oi_by_strike.items(), key=lambda kv: kv[1])[0], "options_max_oi"
+    return None, ""
 
 
 def _spot_from_aggs(ticker: str) -> Optional[float]:
@@ -204,7 +212,7 @@ def _spot_from_aggs(ticker: str) -> Optional[float]:
     except Exception:
         pass
     try:
-        r = _get(f"/v2/aggs/ticker/{ticker.upper()}/prev", {"adjusted": "true"})
+        r = _get(f"/v2/aggs/ticker/{_agg_ticker(ticker)}/prev", {"adjusted": "true"})
         res = r.get("results") or []
         if res and res[0].get("c"):
             return float(res[0]["c"])
@@ -219,14 +227,29 @@ def spot(ticker: str) -> float:
     proxy on Options-only plans where stock aggregates aren't entitled. Some
     resellers return a stale `underlying_asset.price`, so aggregates first
     avoids a spot that disagrees with the chart and TradingView."""
+    return spot_info(ticker)["price"]
+
+
+# Origen del último spot calculado por ticker (para los metadatos de la API).
+SPOT_SOURCE: dict[str, str] = {}
+
+
+def spot_info(ticker: str) -> dict:
+    """Spot + de dónde salió. `source`:
+      aggregates            precio negociado real (agregados)
+      options_underlying    precio del subyacente que trae el snapshot de opciones
+      options_parity        implícito por paridad put-call (estimado)
+      options_max_oi        strike con más open interest (estimación burda)"""
     ticker = ticker.upper()
     _api_key()  # raise the clear "POLYGON_API_KEY not set" error up front
     px = _spot_from_aggs(ticker)
     if px and px > 0:
-        return float(px)
-    px = _spot_from_options(ticker)
+        SPOT_SOURCE[ticker] = "aggregates"
+        return {"price": float(px), "source": "aggregates", "estimated": False}
+    px, src = _spot_from_options_src(ticker)
     if px:
-        return float(px)
+        SPOT_SOURCE[ticker] = src
+        return {"price": float(px), "source": src, "estimated": src != "options_underlying"}
     raise RuntimeError(
         f"Polygon: couldn't derive a spot for {ticker!r} from aggregates or the "
         f"options snapshot — it may have no listed options on this plan."
@@ -253,20 +276,45 @@ def price_history(ticker: str, period: str = "1y", interval: str = "1d") -> pd.S
     return ser
 
 
+MARKET_TZ = "America/New_York"
+
+
+_INDEX_TICKERS = {"SPX", "NDX", "DJX", "RUT", "OEX", "VIX", "XSP"}
+
+
+def _agg_ticker(ticker: str) -> str:
+    """Massive/Polygon: los índices van con prefijo I: en los agregados."""
+    t = ticker.upper()
+    return f"I:{t}" if t in _INDEX_TICKERS else t
+
+
+def _ms_to_ny(ms) -> pd.DatetimeIndex:
+    """epoch-ms (UTC) → hora local de Nueva York sin tz (reloj del mercado)."""
+    return (pd.to_datetime(ms, unit="ms", utc=True)
+            .tz_convert(MARKET_TZ).tz_localize(None))
+
+
+def _today_ny():
+    return pd.Timestamp.now(tz=MARKET_TZ).date()
+
+
 def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.DataFrame:
     ticker = ticker.upper()
     span, _ = _parse_period(period)
-    end = datetime.utcnow().date()
+    end = datetime.utcnow().date() + timedelta(days=1)  # incluye el día UTC en curso completo
     start = end - timedelta(days=max(span, 1))
     mult, timespan = _interval_to_polygon(interval)
-    path = (f"/v2/aggs/ticker/{ticker}/range/{mult}/{timespan}/"
+    path = (f"/v2/aggs/ticker/{_agg_ticker(ticker)}/range/{mult}/{timespan}/"
             f"{start.isoformat()}/{end.isoformat()}")
     data = _get(path, {"adjusted": "true", "sort": "asc", "limit": 50_000})
     rows = data.get("results") or []
     if not rows:
         raise RuntimeError(f"Polygon: no intraday bars for {ticker!r}")
     df = pd.DataFrame({
-        "ts":     pd.to_datetime([r["t"] for r in rows], unit="ms"),
+        # Polygon da epoch-ms en UTC. Se normaliza a hora de Nueva York (naive),
+        # igual que yfinance/yahoo_direct: así todas las fuentes comparten el
+        # mismo reloj de mercado y la ventana de sesión (09:30–16:00) es válida.
+        "ts":     _ms_to_ny([r["t"] for r in rows]),
         "open":   [float(r["o"]) for r in rows],
         "high":   [float(r["h"]) for r in rows],
         "low":    [float(r["l"]) for r in rows],
@@ -280,16 +328,37 @@ def option_chain(
     ticker: str,
     expiries: Optional[list[str]] = None,
     max_expiries: int = 4,
+    spot: Optional[float] = None,
+    strike_pct: Optional[float] = None,
 ) -> pd.DataFrame:
-    """Fetch the current options snapshot; paginated via `next_url`."""
+    """Snapshot de la cadena de opciones, paginado vía `next_url`.
+
+    Antes se pedía la cadena sin filtro ni orden y se cortaba en 500 contratos:
+    en subyacentes con muchos strikes eso dejaba 1–2 vencimientos (llenos de
+    strikes lejanos) y en índices podía devolver solo contratos vencidos. Ahora:
+      · solo vencimientos desde HOY (hora de Nueva York),
+      · ordenado por vencimiento ascendente,
+      · si se conoce el spot, solo strikes dentro de ±strike_pct alrededor,
+      · se para al completar `max_expiries` vencimientos (el siguiente, que
+        llegaría incompleto, se descarta)."""
     ticker = ticker.upper()
-    max_contracts = int(os.environ.get("POLYGON_MAX_STRIKES", "500"))
+    max_contracts = int(os.environ.get("POLYGON_MAX_STRIKES", "6000"))
     rows: list[dict] = []
     path = f"/v3/snapshot/options/{ticker}"
-    params: dict = {"limit": 250}
+    params: dict = {
+        "limit": 250,
+        "expiration_date.gte": _today_ny().isoformat(),
+        "sort": "expiration_date",
+        "order": "asc",
+    }
+    if spot and spot > 0:
+        pct = strike_pct if strike_pct else float(os.environ.get("PROFITLAB_STRIKE_PCT", "0.12"))
+        params["strike_price.gte"] = round(spot * (1 - pct), 2)
+        params["strike_price.lte"] = round(spot * (1 + pct), 2)
     if expiries:
-        # Filter server-side to reduce pagination hops.
+        params.pop("expiration_date.gte", None)
         params["expiration_date"] = ",".join(expiries)
+    exp_seen: set = set()
 
     seen_urls: set[str] = set()
     while True:
@@ -317,7 +386,12 @@ def option_chain(
                 "last": float(day.get("close") or np.nan),
                 "volume": float(day.get("volume") or 0.0),
             })
+            exp_seen.add(exp)
         if len(rows) >= max_contracts:
+            break
+        # Ordenado por vencimiento: con max_expiries+1 vistos, el último está
+        # incompleto y los anteriores ya llegaron enteros.
+        if not expiries and max_expiries and len(exp_seen) > max_expiries:
             break
         nxt = data.get("next_url")
         if not nxt or nxt in seen_urls:
@@ -339,12 +413,20 @@ def option_chain(
         )
         df = df[df["expiry"].isin(keep)]
 
-    # Cleanup: clip nonsense IVs and forward-fill from median (same as yfinance path).
+    # Defensa extra: nunca contratos vencidos (por si el proveedor ignora el filtro).
+    df = df[df["expiry"] >= pd.Timestamp(_today_ny())]
+    if df.empty:
+        raise RuntimeError(f"Polygon: la cadena de {ticker!r} solo tiene vencimientos pasados")
+
+    # IV: se descartan valores absurdos y los huecos se rellenan con la mediana
+    # DEL MISMO VENCIMIENTO (documentado). Si no hay ninguna IV real, NO se
+    # inventa una constante: se marca y los cálculos que la necesitan fallan
+    # con "datos insuficientes".
     df.loc[(df["iv"] <= 0.01) | (df["iv"] > 5.0), "iv"] = np.nan
-    if df["iv"].isna().all():
-        df["iv"] = 0.22
-    else:
-        df["iv"] = df["iv"].fillna(df["iv"].median())
+    df["iv_imputed"] = df["iv"].isna()
+    df["iv"] = df.groupby("expiry")["iv"].transform(lambda s: s.fillna(s.median()))
+    df.attrs["iv_missing"] = bool(df["iv"].isna().all())
+    df.attrs["spot_used"] = spot
     return df.reset_index(drop=True)
 
 
