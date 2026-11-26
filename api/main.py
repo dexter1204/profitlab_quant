@@ -46,7 +46,7 @@ from .aula import require_access  # noqa: E402  — access via the Aula Virtual
 
 # Versión de la metodología de cálculo. Se devuelve en `meta` de cada respuesta
 # para que web/iOS/Android puedan verificar que usan el mismo motor.
-CALC_VERSION = "2026.11.26-pro15"
+CALC_VERSION = "2026.11.26-pro15b"
 MARKET_TZ = "America/New_York"
 RTH_START, RTH_END = 9 * 60 + 30, 16 * 60   # sesión regular NYSE/Nasdaq (min. del día, hora NY)
 
@@ -184,8 +184,16 @@ def _options(symbol: str, max_expiries: int = 4, strike_pct: float | None = None
             spot = float(si["price"])
             chain = pdata.option_chain(und, max_expiries=max_expiries,
                                        spot=spot, strike_pct=strike_pct)
-            # IV que el proveedor no trae → calculada desde el precio del contrato.
             asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+            # Spot burdo (strike con más OI o cierre de ayer) → se refina por
+            # paridad put-call con la propia cadena cerca del dinero. Así la IV
+            # calculada y las griegas no heredan un spot desviado.
+            if si.get("source") in ("options_max_oi", "prev_close"):
+                ps = ivmod.parity_spot(chain, spot, asof)
+                if ps and abs(ps / spot - 1) < 0.15:
+                    si = {"price": ps, "source": "options_parity_chain", "estimated": True}
+                    spot = ps
+            # IV que el proveedor no trae → calculada desde el precio del contrato.
             chain, iv_stats = ivmod.fill_from_quotes(chain, spot, asof)
             q = dataquality.assess_chain(chain, spot=spot)
             if chain.attrs.get("iv_missing"):
