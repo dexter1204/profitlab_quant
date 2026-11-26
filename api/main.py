@@ -673,11 +673,39 @@ def _bucket(grid: pd.DataFrame, col: str, width: float | None) -> pd.DataFrame:
     return g.groupby(["strike", "expiry"], as_index=False)[col].sum()
 
 
+def _delta_surface_legacy(ticker: str, kind: str):
+    """Formato v1 (OBSOLETO): delta teórico Black-Scholes de una opción ATM
+    sobre una rejilla spot × días, con la IV ATM real del activo. Solo para
+    clientes antiguos; no es exposición."""
+    def _compute():
+        oc = _options(ticker)
+        iv = _atm_iv(oc.chain, oc.spot)
+        if iv is None:
+            raise RuntimeError("Sin IV ATM real para la superficie teórica.")
+        ctx = exposures.ChainContext(spot=oc.spot,
+                                     asof=pd.Timestamp.now("UTC").tz_localize(None).normalize())
+        spot_axis, days_axis, grid = exposures.delta_surface(ctx, strike=oc.spot, iv=iv,
+                                                             days_max=60, kind=kind)
+        _meta_warn("Formato obsoleto (delta teórico). Actualiza la app para ver la exposición real.")
+        return {
+            "ticker": ticker, "spot": _clean(oc.spot), "kind": kind, "iv": _clean(iv),
+            "spot_axis": [float(x) for x in spot_axis],
+            "days_axis": [float(d) for d in days_axis],
+            "z": [[_clean(x) for x in row] for row in grid],
+            "deprecated": True,
+        }
+    try:
+        return _cached(f"dsurf_v1:{ticker}:{kind}", _compute)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/api/delta_surface/{ticker}", dependencies=GATED)
 def delta_surface(ticker: str,
                   kind: str = Query("net"),
                   exp: int = Query(8, ge=2, le=12),
-                  window: int = Query(24, ge=5, le=60)):
+                  window: int = Query(24, ge=5, le=60),
+                  v: int = Query(1, ge=1, le=2)):
     """Delta Surface = EXPOSICIÓN DELTA REAL de los dealers (DEX) por
     strike × vencimiento, construida con el open interest de la cadena.
 
@@ -693,6 +721,11 @@ def delta_surface(ticker: str,
     casi idéntica en todos los activos y no usaba open interest."""
     ticker = ticker.upper().strip()
     kind = kind.lower().strip()
+    if v < 2:
+        # COMPATIBILIDAD: apps ya instaladas (≤ 1.3) piden sin `v` y esperan el
+        # formato antiguo (spot_axis/days_axis). Se les sigue sirviendo, marcado
+        # como obsoleto, hasta que actualicen. La app nueva pide v=2.
+        return _delta_surface_legacy(ticker, kind if kind in ("call", "put") else "call")
     if kind not in ("net", "call", "put"):
         kind = "net"
 

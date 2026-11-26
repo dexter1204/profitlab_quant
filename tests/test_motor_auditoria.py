@@ -212,14 +212,14 @@ def test_cache_y_meta_no_se_mezclan_entre_activos(monkeypatch):
     spots = {"QQQ": 600.0, "GLD": 250.0}
     chains = {"QQQ": _chain(600.0, oi_scale=3.0, iv=0.18), "GLD": _chain(250.0, oi_scale=1.0, iv=0.30)}
     monkeypatch.setattr(main, "_options", _fake_options(spots, chains))
-    a = main.delta_surface("QQQ", kind="net", exp=3, window=10)
-    b = main.delta_surface("XAUUSD", kind="net", exp=3, window=10)
+    a = main.delta_surface("QQQ", kind="net", exp=3, window=10, v=2)
+    b = main.delta_surface("XAUUSD", kind="net", exp=3, window=10, v=2)
     assert a["meta"]["options_underlying"] == "QQQ" and b["meta"]["options_underlying"] == "GLD"
     assert a["spot"] == 600.0 and b["spot"] == 250.0
     assert a["strikes"] != b["strikes"]
     assert a["meta"]["calc_version"] == main.CALC_VERSION
     assert b["meta"]["instrument"]["proxy"] is True
-    assert main.delta_surface("QQQ", kind="net", exp=3, window=10) is a   # caché por activo
+    assert main.delta_surface("QQQ", kind="net", exp=3, window=10, v=2) is a   # caché por activo
 
 
 # ── 5. Delta Surface = exposición real ───────────────────────────────────────
@@ -227,7 +227,7 @@ def test_delta_surface_cambia_con_el_open_interest_y_sigue_la_formula(monkeypatc
     spots = {"QQQ": 600.0, "GLD": 250.0}
     chains = {"QQQ": _chain(600.0, oi_scale=2.0), "GLD": _chain(250.0, oi_scale=2.0)}
     monkeypatch.setattr(main, "_options", _fake_options(spots, chains))
-    d = main.delta_surface("QQQ", kind="net", exp=3, window=10)
+    d = main.delta_surface("QQQ", kind="net", exp=3, window=10, v=2)
 
     # Recalcula a mano una celda: Σ signo × delta_BS × OI × 100 × spot
     from profitlab import exposures, greeks
@@ -244,7 +244,7 @@ def test_delta_surface_cambia_con_el_open_interest_y_sigue_la_formula(monkeypatc
     # Duplicar el OI duplica la superficie (es exposición, no un delta teórico)
     main._CACHE.clear()
     chains["QQQ"] = _chain(600.0, oi_scale=4.0)
-    d2 = main.delta_surface("QQQ", kind="net", exp=3, window=10)
+    d2 = main.delta_surface("QQQ", kind="net", exp=3, window=10, v=2)
     assert d2["z"][5][1] == pytest.approx(2 * d["z"][5][1], rel=1e-9)
 
 
@@ -253,7 +253,7 @@ def test_delta_surface_sin_open_interest_no_inventa(monkeypatch):
     ch["oi"] = 0.0
     monkeypatch.setattr(main, "_options", _fake_options({"QQQ": 600.0}, {"QQQ": ch}))
     with pytest.raises(Exception, match="open interest"):
-        main.delta_surface("QQQ", kind="net", exp=3, window=10)
+        main.delta_surface("QQQ", kind="net", exp=3, window=10, v=2)
 
 
 # ── 6. Volume Profile ────────────────────────────────────────────────────────
@@ -345,3 +345,11 @@ def test_agrupar_strikes_conserva_la_exposicion_total():
 
 def test_sin_agrupar_cuando_hay_pocos_strikes():
     assert main._bucket_width(np.arange(100, 130, 1.0), max_rows=40) is None
+
+
+def test_delta_surface_v1_sigue_sirviendo_a_apps_antiguas(monkeypatch):
+    monkeypatch.setattr(main, "_options", _fake_options({"QQQ": 600.0}, {"QQQ": _chain(600.0, iv=0.25)}))
+    r = main.delta_surface("QQQ", kind="call", exp=8, window=24, v=1)
+    assert r["deprecated"] is True and r["spot_axis"] and r["days_axis"]
+    assert r["iv"] == pytest.approx(0.25)                 # IV real del activo, no 20 % fijo
+    assert any("obsoleto" in w for w in r["meta"]["warnings"])

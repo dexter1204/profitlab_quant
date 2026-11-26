@@ -1285,7 +1285,7 @@
     oi:      { plot: "oiChart",    symbolic: true,  path: (s) => `/api/oi/${s}?window=24`,        render: renderOI },
     flow:    { plot: "flowChart",  symbolic: true,  path: (s) => `/api/flow/${s}?top=18`,         render: renderFlow },
     dsurf:   { plot: "deltaSurf",  symbolic: true,  sub: () => state.deltaKind,
-               path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}`, render: renderDeltaSurface },
+               path: (s) => `/api/delta_surface/${s}?kind=${state.deltaKind}&v=2`, render: renderDeltaSurface },
     drift:   { plot: "netDrift",   symbolic: true,  path: (s) => `/api/net_drift/${s}`,          render: renderNetDrift },
     voldrift:{ plot: "volDrift",   symbolic: true,  path: (s) => `/api/volatility_drift/${s}`,   render: renderVolatilityDrift },
     vp:      { plot: "vpChart",    symbolic: true,  engine: "lwc",  path: (s) => `/api/volume_profile/${s}?bins=48`, render: renderVolumeProfile },
