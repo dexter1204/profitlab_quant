@@ -198,19 +198,44 @@ def _spot_from_options_src(ticker: str) -> tuple[Optional[float], str]:
     return None, ""
 
 
-def _spot_from_aggs(ticker: str) -> Optional[float]:
-    """Latest traded price from the aggregates feed — the most accurate spot
-    (matches the tape / TradingView). Tries the last intraday minute close,
-    then the previous daily close. Returns None if aggregates aren't entitled
-    on this plan (so we fall back to the options-derived spot)."""
+# Cortocircuito: con planes Basic (fin de día, 5 llamadas/min) la barra de hoy
+# nunca llega y los reintentos por 429 frenan cada respuesta. Tras un fallo se
+# deja de pedir intradía a Massive durante PROFITLAB_INTRADAY_COOLDOWN s.
+_INTRADAY_OFF_UNTIL: dict[str, float] = {}
+
+
+def _intraday_cooldown() -> float:
+    return float(os.environ.get("PROFITLAB_INTRADAY_COOLDOWN", "600"))
+
+
+def intraday_available(ticker: str) -> bool:
+    kind = "index" if ticker.upper() in _INDEX_TICKERS else "stock"
+    return time.time() >= _INTRADAY_OFF_UNTIL.get(kind, 0.0)
+
+
+def _mark_intraday_off(ticker: str) -> None:
+    kind = "index" if ticker.upper() in _INDEX_TICKERS else "stock"
+    _INTRADAY_OFF_UNTIL[kind] = time.time() + _intraday_cooldown()
+
+
+def _spot_from_intraday(ticker: str) -> Optional[float]:
+    """Último cierre de 1 minuto de HOY (hora NY). None si el plan no da
+    intradía o la última barra no es de hoy."""
+    if not intraday_available(ticker):
+        return None
     try:
         df = intraday_bars(ticker, interval="1m", period="1d")
         if df is not None and len(df):
-            c = float(df["close"].iloc[-1])
-            if c > 0:
-                return c
+            last = df.iloc[-1]
+            if pd.Timestamp(last["ts"]).date() == _today_ny() and float(last["close"]) > 0:
+                return float(last["close"])
     except Exception:
         pass
+    _mark_intraday_off(ticker)
+    return None
+
+
+def _spot_from_prev_close(ticker: str) -> Optional[float]:
     try:
         r = _get(f"/v2/aggs/ticker/{_agg_ticker(ticker)}/prev", {"adjusted": "true"})
         res = r.get("results") or []
@@ -219,6 +244,11 @@ def _spot_from_aggs(ticker: str) -> Optional[float]:
     except Exception:
         pass
     return None
+
+
+def _spot_from_aggs(ticker: str) -> Optional[float]:
+    """Compatibilidad: intradía de hoy y, si no, cierre anterior."""
+    return _spot_from_intraday(ticker) or _spot_from_prev_close(ticker)
 
 
 def spot(ticker: str) -> float:
@@ -242,14 +272,27 @@ def spot_info(ticker: str) -> dict:
       options_max_oi        strike con más open interest (estimación burda)"""
     ticker = ticker.upper()
     _api_key()  # raise the clear "POLYGON_API_KEY not set" error up front
-    px = _spot_from_aggs(ticker)
+    # Orden por calidad para un plan de opciones con retraso de 15 min:
+    #   1. barra intradía de hoy (agregados)           → precio negociado
+    #   2. subyacente del snapshot de opciones          → precio del proveedor
+    #   3. paridad put-call con cotizaciones de opciones → estimado, mismo retraso
+    #   4. cierre de ayer (planes Basic: fin de día)    → estimado y viejo
+    #   5. strike con más OI                             → estimación burda
+    px = _spot_from_intraday(ticker)
     if px and px > 0:
         SPOT_SOURCE[ticker] = "aggregates"
         return {"price": float(px), "source": "aggregates", "estimated": False}
     px, src = _spot_from_options_src(ticker)
-    if px:
+    if px and src in ("options_underlying", "options_parity"):
         SPOT_SOURCE[ticker] = src
         return {"price": float(px), "source": src, "estimated": src != "options_underlying"}
+    prev = _spot_from_prev_close(ticker)
+    if prev and prev > 0:
+        SPOT_SOURCE[ticker] = "prev_close"
+        return {"price": float(prev), "source": "prev_close", "estimated": True}
+    if px:
+        SPOT_SOURCE[ticker] = src
+        return {"price": float(px), "source": src, "estimated": True}
     raise RuntimeError(
         f"Polygon: couldn't derive a spot for {ticker!r} from aggregates or the "
         f"options snapshot — it may have no listed options on this plan."
@@ -300,15 +343,22 @@ def _today_ny():
 
 def intraday_bars(ticker: str, interval: str = "1m", period: str = "1d") -> pd.DataFrame:
     ticker = ticker.upper()
+    if not intraday_available(ticker):
+        raise RuntimeError(f"Polygon: intradía de {ticker!r} no disponible en el plan (en pausa).")
     span, _ = _parse_period(period)
     end = datetime.utcnow().date() + timedelta(days=1)  # incluye el día UTC en curso completo
     start = end - timedelta(days=max(span, 1))
     mult, timespan = _interval_to_polygon(interval)
     path = (f"/v2/aggs/ticker/{_agg_ticker(ticker)}/range/{mult}/{timespan}/"
             f"{start.isoformat()}/{end.isoformat()}")
-    data = _get(path, {"adjusted": "true", "sort": "asc", "limit": 50_000})
+    try:
+        data = _get(path, {"adjusted": "true", "sort": "asc", "limit": 50_000}, _retries=0)
+    except RuntimeError:
+        _mark_intraday_off(ticker)
+        raise
     rows = data.get("results") or []
     if not rows:
+        _mark_intraday_off(ticker)
         raise RuntimeError(f"Polygon: no intraday bars for {ticker!r}")
     df = pd.DataFrame({
         # Polygon da epoch-ms en UTC. Se normaliza a hora de Nueva York (naive),

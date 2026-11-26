@@ -57,8 +57,14 @@ def _session(date: str, closes, vols=None, start="09:30") -> pd.DataFrame:
 @pytest.fixture(autouse=True)
 def _limpia_cache():
     main._CACHE.clear()
+    main._BARS_CACHE.clear()
+    main._BARS_GOOD.clear()
+    poly._INTRADAY_OFF_UNTIL.clear()
     yield
     main._CACHE.clear()
+    main._BARS_CACHE.clear()
+    main._BARS_GOOD.clear()
+    poly._INTRADAY_OFF_UNTIL.clear()
 
 
 def _fake_options(spots: dict, chains: dict):
@@ -353,3 +359,125 @@ def test_delta_surface_v1_sigue_sirviendo_a_apps_antiguas(monkeypatch):
     assert r["deprecated"] is True and r["spot_axis"] and r["days_axis"]
     assert r["iv"] == pytest.approx(0.25)                 # IV real del activo, no 20 % fijo
     assert any("obsoleto" in w for w in r["meta"]["warnings"])
+
+
+
+# ── 10. Modo pro 15 min: IV desde cotizaciones ───────────────────────────────
+def test_iv_por_inversion_recupera_la_volatilidad_original():
+    from profitlab import greeks
+    ks = np.array([90.0, 100.0, 110.0, 95.0, 105.0])
+    kinds = np.array(["call", "call", "call", "put", "put"])
+    sig = np.array([0.35, 0.25, 0.20, 0.30, 0.22])
+    px = np.array([float(greeks.price(100, k, 0.1, 0.045, sv, 0, kd)) for k, sv, kd in zip(ks, sig, kinds)])
+    iv = greeks.implied_vol(px, 100, ks, 0.1, 0.045, 0, kinds)
+    assert iv == pytest.approx(sig, abs=1e-6)
+
+
+def test_iv_no_se_fuerza_con_precios_incoherentes():
+    from profitlab import greeks
+    # precio por debajo del intrínseco (call ITM 20 pts a 1 $) y por encima del spot
+    iv = greeks.implied_vol([1.0, 150.0], 100, [80.0, 100.0], 0.1, 0.045, 0, "call")
+    assert np.isnan(iv).all()
+
+
+def test_fill_from_quotes_usa_el_precio_real_del_contrato():
+    from profitlab import greeks, iv as ivmod
+    asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    exp = asof + pd.Timedelta(days=30)
+    t = 30 / 365
+    p_call = float(greeks.price(100, 105, t, 0.045, 0.40, 0, "call"))
+    ch = pd.DataFrame({
+        "strike": [100.0, 105.0], "expiry": [exp, exp], "type": ["call", "call"],
+        "oi": [10.0, 10.0], "iv": [0.25, 0.25],      # la 2.ª trae la mediana (imputada)
+        "iv_imputed": [False, True],
+        "bid": [np.nan, p_call - 0.01], "ask": [np.nan, p_call + 0.01], "last": [np.nan, np.nan],
+    })
+    out, st = ivmod.fill_from_quotes(ch, 100.0, asof)
+    assert out["iv"].iloc[0] == 0.25 and out["iv_source"].iloc[0] == "vendor"
+    assert out["iv"].iloc[1] == pytest.approx(0.40, abs=1e-4)          # no la mediana
+    assert out["iv_source"].iloc[1] == "quotes"
+    assert st["vendor_pct"] == 50.0 and st["quotes_pct"] == 50.0
+
+
+# ── 11. Barras: fuente más reciente, caché compartida, último dato bueno ─────
+def test_elige_yahoo_si_massive_solo_trae_ayer(monkeypatch):
+    want = main._expected_session_date()
+    ayer = (pd.Timestamp(want) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    hoy = pd.Timestamp(want).strftime("%Y-%m-%d")
+    calls = []
+
+    def loaders(t, i, p):
+        def v():
+            calls.append("vendor"); return _session(ayer, [100.0] * 30)
+        def y():
+            calls.append("yfinance"); return _session(hoy, [101.0] * 30)
+        return [("vendor", v), ("yfinance", y)]
+    monkeypatch.setattr(main, "_bars_loaders", loaders)
+    token = main._META.set({"warnings": []})
+    try:
+        df = main._intraday_bars_fallback("QQQ", "1m", "5d")
+        df2 = main._intraday_bars_fallback("QQQ", "1m", "5d")     # caché compartida
+        meta = main._META.get()
+    finally:
+        main._META.reset(token)
+    assert str(pd.to_datetime(df["ts"]).max().date()) == hoy
+    assert meta["bars_source"] == "yfinance"
+    assert calls == ["vendor", "yfinance"]                        # 2.ª llamada sin descargar
+    assert df2 is not df                                          # copia defensiva
+
+
+def test_si_todo_falla_usa_el_ultimo_dato_bueno_y_avisa(monkeypatch):
+    ok = _session("2026-11-24", [100.0] * 30)
+    state = {"fail": False}
+
+    def loaders(t, i, p):
+        def v():
+            if state["fail"]:
+                raise RuntimeError("429")
+            return ok
+        return [("vendor", v)]
+    monkeypatch.setattr(main, "_bars_loaders", loaders)
+    main._intraday_bars_fallback("QQQ", "1m", "5d")
+    main._BARS_CACHE.clear()                                      # expira la caché
+    state["fail"] = True
+    token = main._META.set({"warnings": []})
+    try:
+        df = main._intraday_bars_fallback("QQQ", "1m", "5d")
+        warns = main._META.get()["warnings"]
+    finally:
+        main._META.reset(token)
+    assert df is not None and len(df) == 30
+    assert any("último dato válido" in w for w in warns)
+
+
+# ── 12. Origen del spot y cortocircuito del plan Basic ───────────────────────
+def test_spot_prefiere_paridad_al_cierre_de_ayer(monkeypatch):
+    monkeypatch.setattr(poly, "_spot_from_intraday", lambda t: None)
+    monkeypatch.setattr(poly, "_spot_from_options_src", lambda t: (7180.5, "options_parity"))
+    monkeypatch.setattr(poly, "_spot_from_prev_close", lambda t: 7100.0)
+    with patch.dict(os.environ, {"POLYGON_API_KEY": "k"}):
+        r = poly.spot_info("SPX")
+    assert r == {"price": 7180.5, "source": "options_parity", "estimated": True}
+
+
+def test_cierre_de_ayer_es_estimado_si_no_hay_nada_mejor(monkeypatch):
+    monkeypatch.setattr(poly, "_spot_from_intraday", lambda t: None)
+    monkeypatch.setattr(poly, "_spot_from_options_src", lambda t: (None, ""))
+    monkeypatch.setattr(poly, "_spot_from_prev_close", lambda t: 7100.0)
+    with patch.dict(os.environ, {"POLYGON_API_KEY": "k"}):
+        r = poly.spot_info("SPX")
+    assert r["source"] == "prev_close" and r["estimated"] is True
+
+
+def test_cortocircuito_no_repite_llamadas_de_plan_basic():
+    calls = []
+
+    def fake_get(path, params=None, _retries=2):
+        calls.append(path)
+        return {"results": []}
+    with patch.dict(os.environ, {"POLYGON_API_KEY": "k"}), patch.object(poly, "_get", fake_get):
+        with pytest.raises(RuntimeError):
+            poly.intraday_bars("QQQ")
+        with pytest.raises(RuntimeError, match="en pausa"):
+            poly.intraday_bars("SPY")                             # misma clase (acciones)
+    assert len(calls) == 1

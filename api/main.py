@@ -46,7 +46,7 @@ from .aula import require_access  # noqa: E402  — access via the Aula Virtual
 
 # Versión de la metodología de cálculo. Se devuelve en `meta` de cada respuesta
 # para que web/iOS/Android puedan verificar que usan el mismo motor.
-CALC_VERSION = "2026.11.25-auditoria"
+CALC_VERSION = "2026.11.26-pro15"
 MARKET_TZ = "America/New_York"
 RTH_START, RTH_END = 9 * 60 + 30, 16 * 60   # sesión regular NYSE/Nasdaq (min. del día, hora NY)
 
@@ -140,6 +140,8 @@ def _cached(key: str, producer):
         "vendor": pdata.vendor_name(),
         "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "timezone": MARKET_TZ,
+        # Plan Options Starter de Massive: cotizaciones con 15 min de retraso.
+        "data_delay_min": int(os.environ.get("PROFITLAB_DATA_DELAY_MIN", "15")),
         "warnings": [],
         "estimated": {},
     })
@@ -182,6 +184,9 @@ def _options(symbol: str, max_expiries: int = 4, strike_pct: float | None = None
             spot = float(si["price"])
             chain = pdata.option_chain(und, max_expiries=max_expiries,
                                        spot=spot, strike_pct=strike_pct)
+            # IV que el proveedor no trae → calculada desde el precio del contrato.
+            asof = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+            chain, iv_stats = ivmod.fill_from_quotes(chain, spot, asof)
             q = dataquality.assess_chain(chain, spot=spot)
             if chain.attrs.get("iv_missing"):
                 q["ok"] = False
@@ -202,8 +207,8 @@ def _options(symbol: str, max_expiries: int = 4, strike_pct: float | None = None
                     "expiries": exps,
                     "iv_coverage": q.get("iv_coverage"),
                     "oi_coverage": q.get("oi_coverage"),
-                    "iv_imputed_pct": round(float(chain["iv_imputed"].mean()) * 100, 1)
-                    if "iv_imputed" in chain.columns else None,
+                    "iv_imputed_pct": iv_stats.get("median_pct"),
+                    "iv_sources": iv_stats,
                     "severity": q.get("severity"),
                 }
                 for w in q.get("warnings", []):
@@ -272,6 +277,29 @@ def health(probe: str = Query(None, description="optional ticker to probe the li
     }
     if probe:
         t = probe.upper().strip()
+        # Diagnóstico sin datos sensibles: qué subyacente se usó, por qué se
+        # descartó el principal, origen del spot, fuentes de IV y barras.
+        token = _META.set({"warnings": [], "estimated": {}})
+        try:
+            try:
+                bars = _session_bars(t)
+                bm = _META.get()
+                out["bars"] = {"symbol": bm.get("bars_symbol"), "source": bm.get("bars_source"),
+                               "n": 0 if bars is None else int(len(bars)),
+                               "session": bm.get("bars_session"), "last": bm.get("bars_last_ts"),
+                               "errors": bm.get("bars_errors", [])}
+            except Exception as e:  # noqa: BLE001
+                out["bars"] = {"error": str(e)[:200]}
+            try:
+                oc = _options(t, max_expiries=2)
+                mm = _META.get()
+                out["options"] = {k: mm.get(k) for k in ("options_underlying", "options_fallback_used",
+                                                          "spot", "spot_source", "spot_estimated", "chain")}
+                out["warnings"] = mm.get("warnings", [])
+            except Exception as e:  # noqa: BLE001
+                out["options"] = {"error": str(e)[:300]}
+        finally:
+            _META.reset(token)
         try:
             oc = _options(t, max_expiries=2)
             chain, spot = oc.chain, oc.spot
@@ -389,22 +417,13 @@ def chart(ticker: str,
     def _compute():
         payload = _gamma_payload(ticker, window)
         bars, source = [], None
-        # Massive (the live vendor) first; Yahoo only as a fallback for the
-        # intraday stock/ETF bars an options-only plan can't price.
-        loaders = [("vendor", lambda: pdata.intraday_bars(ticker, interval=interval, period=period))]
-        if pdata.vendor_name() not in ("yf", "yfinance"):
-            loaders.append(("yfinance", _yf_bars))
-        loaders.append(("yahoo", _yd_bars))
-        for name, loader in loaders:
-            try:
-                df = loader()
-                if df is not None and len(df):
-                    bars = _bars_from(df)
-                    if bars:
-                        source = name
-                        break
-            except Exception:
-                continue
+        # Velas del MISMO subyacente que los niveles, desde la caché compartida
+        # (mejor fuente disponible: Massive si da las de hoy, si no Yahoo).
+        und = _meta().get("options_underlying") or ticker
+        df = _intraday_bars_fallback(und, interval=interval, period=period)
+        if df is not None and len(df):
+            bars = _bars_from(_clean_bars(df))
+            source = _meta().get("bars_source")
         payload["bars"] = bars
         payload["bars_source"] = source
         payload["interval"] = interval
@@ -766,9 +785,39 @@ def delta_surface(ticker: str,
         raise HTTPException(status_code=502, detail=str(e))
 
 
-def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d"):
-    """Barras intradía (ts en hora de Nueva York): proveedor principal y, si no
-    las entrega, yfinance y Yahoo directo. Registra en `meta` qué fuente sirvió."""
+import threading  # noqa: E402
+
+# ── Barras intradía: caché compartida + mejor fuente + último dato bueno ─────
+# Antes cada vista (Volume Profile, drifts, niveles, chart) descargaba sus
+# propias barras de Yahoo en cada actualización y por cada usuario: muchas
+# peticiones desde la IP de Render → Yahoo la bloqueaba. Ahora una sola
+# descarga por (símbolo, intervalo, periodo) cada PROFITLAB_BARS_TTL segundos,
+# compartida por todas las vistas y usuarios, con un solo hilo descargando.
+_BARS_CACHE: dict = {}          # key -> (time, df, source)
+_BARS_GOOD: dict = {}           # key -> (time, df, source)   último dato válido
+_BARS_LOCKS: dict = {}
+_BARS_GLOBAL = threading.Lock()
+
+
+def _bars_ttl() -> float:
+    return float(os.environ.get("PROFITLAB_BARS_TTL", "60"))
+
+
+def _expected_session_date():
+    """Fecha de la sesión que debería existir ya (hora NY): hoy si es día
+    hábil y ya abrió; si no, el día hábil anterior (sin calendario de feriados:
+    si no hay datos se usa la fuente más reciente disponible)."""
+    now = pd.Timestamp.now(tz=MARKET_TZ).tz_localize(None)
+    d = now.normalize()
+    if now.weekday() < 5 and now.hour * 60 + now.minute >= RTH_START:
+        return d.date()
+    d -= pd.Timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= pd.Timedelta(days=1)
+    return d.date()
+
+
+def _bars_loaders(ticker: str, interval: str, period: str):
     loaders = [("vendor", lambda: pdata.intraday_bars(ticker, interval=interval, period=period))]
     # yfinance library: the maintained free source. It handles Yahoo's
     # cookie/crumb handshake, so it's the right fallback for ETFs / indices an
@@ -778,31 +827,68 @@ def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d
     if pdata.vendor_name() not in ("yf", "yfinance"):
         from profitlab.data import yfinance as _yf
         loaders.append(("yfinance", lambda: _yf.intraday_bars(ticker, interval=interval, period=period)))
-    # Last-resort: hit Yahoo's v8 endpoint directly (no yfinance dependency) so
-    # a broken library build doesn't blank the intraday views when Yahoo is
-    # still serving. Best-effort — backs off cleanly if Yahoo rate-limits it.
+    # Last-resort: Yahoo's v8 endpoint directly (no yfinance dependency).
     from profitlab.data import yahoo_direct as _yd
     loaders.append(("yahoo", lambda: _yd.intraday_bars(ticker, interval=interval, period=period)))
-    errors = []
-    for name, loader in loaders:
+    return loaders
+
+
+def _fetch_best_bars(ticker: str, interval: str, period: str):
+    """Prueba las fuentes en orden y se queda con la PRIMERA que tenga la
+    sesión esperada; si ninguna la tiene, con la más reciente. Así un plan
+    Basic de Massive (velas solo hasta ayer) no tapa a Yahoo con las de hoy."""
+    want = _expected_session_date()
+    best, best_src, best_last, errors = None, None, None, []
+    for name, loader in _bars_loaders(ticker, interval, period):
         try:
             df = loader()
-            if df is not None and len(df):
-                m = _META.get()
-                if m is not None:
-                    m["bars_source"] = name if name != "vendor" else pdata.vendor_name()
-                if name != "vendor":
-                    _meta_warn(f"Barras de {ticker} desde {name} (respaldo gratuito, "
-                               "puede tener retraso) porque el proveedor principal no las entrega.")
-                return df
-            errors.append(f"{name}: vacío")
+            if df is None or not len(df):
+                errors.append(f"{name}: vacío")
+                continue
+            last = pd.Timestamp(pd.to_datetime(df["ts"]).max())
+            if best_last is None or last > best_last:
+                best, best_src, best_last = df, name, last
+            if last.date() >= want:
+                break
+            errors.append(f"{name}: última barra {last.date()} (atrasada)")
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {str(e)[:80]}")
-            continue
+    return best, best_src, errors
+
+
+def _intraday_bars_fallback(ticker: str, interval: str = "1m", period: str = "1d"):
+    """Barras intradía (ts en hora de Nueva York) desde la caché compartida.
+    Registra en `meta` la fuente, la edad de la caché y si es un dato de
+    respaldo (último válido) porque todas las fuentes fallaron."""
+    key = (ticker.upper(), interval, period)
+    with _BARS_GLOBAL:
+        lock = _BARS_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        now = time.time()
+        hit = _BARS_CACHE.get(key)
+        if hit and now - hit[0] < _bars_ttl():
+            ts0, df, src, errors = hit[0], hit[1], hit[2], []
+        else:
+            df, src, errors = _fetch_best_bars(ticker, interval, period)
+            ts0 = now
+            if df is not None:
+                _BARS_CACHE[key] = (now, df, src)
+                _BARS_GOOD[key] = (now, df, src)
+            elif key in _BARS_GOOD:
+                ts0, df, src = _BARS_GOOD[key]
+                _meta_warn(f"Todas las fuentes de barras fallaron; se usa el último dato válido "
+                           f"de hace {int((now - ts0) / 60)} min.")
     m = _META.get()
     if m is not None:
-        m["bars_errors"] = errors
-    return None
+        if errors:
+            m["bars_errors"] = errors
+        if df is not None:
+            m["bars_source"] = src if src != "vendor" else pdata.vendor_name()
+            m["bars_cache_age_s"] = round(time.time() - ts0, 1)
+    if df is not None and src in ("yfinance", "yahoo"):
+        _meta_warn(f"Barras de {ticker} desde Yahoo ({src}): el plan de Massive no entrega "
+                   "las velas de hoy para este instrumento.")
+    return None if df is None else df.copy()
 
 
 def _price_history_fallback(ticker: str, period: str = "6mo", interval: str = "1d"):
