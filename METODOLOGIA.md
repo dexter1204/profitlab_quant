@@ -1,6 +1,6 @@
 # Metodología del motor cuantitativo ProfitLab
 
-Versión de cálculo: **`2026.11.25-auditoria`** (se devuelve en `meta.calc_version` de cada respuesta).
+Versión de cálculo: **`2026.11.26-pro15`** (se devuelve en `meta.calc_version` de cada respuesta).
 Todos los cálculos se hacen en este backend; web, iOS y Android solo dibujan lo que devuelve la API, así que las cifras son idénticas en las tres plataformas.
 
 ## Flujo de datos
@@ -48,6 +48,29 @@ Proveedor (Massive/Polygon · respaldo Yahoo)
 - Se completan exactamente `max_expiries` vencimientos (el siguiente, incompleto, se descarta).
 - IV absurda (≤ 1 % o > 500 %) se descarta; los huecos se rellenan con la **mediana del mismo vencimiento**. Sin ninguna IV real la cadena se rechaza (antes se usaba un 22 % fijo).
 - `T` (años) = max(días hasta vencimiento, 1) / 365, con `r = 4,5 %` y `q = 0` (sin cambios respecto a la versión anterior).
+
+## Modo pro con 15 min de retraso (plan actual: Options Starter + Basic)
+
+Todo el motor trabaja con los datos que da el plan actual, sin contratar nada más, y declara el retraso en `meta.data_delay_min` (15).
+
+**Volatilidad implícita desde el precio.** Cuando Massive no trae la IV de un contrato, se calcula invirtiendo Black-Scholes sobre su precio real (mid bid/ask; si no hay, el último). Se usa bisección de 80 iteraciones entre 1 % y 500 %, con el mismo `T`, `r` y `q` que las griegas. Si el precio no es coherente (≤ valor intrínseco descontado o ≥ cota superior), no se fuerza: queda la mediana del vencimiento o NaN. `meta.chain.iv_sources` indica el % de IV del proveedor, calculada (`quotes`), por mediana o sin dato.
+
+**Precio del subyacente (orden de calidad):**
+1. barra de 1 min de hoy (agregados) — precio negociado;
+2. subyacente del snapshot de opciones;
+3. paridad put-call con las cotizaciones de opciones (estimado, mismo retraso que la cadena);
+4. cierre de ayer (planes Basic) — estimado y viejo;
+5. strike con más open interest — estimación burda.
+
+Antes, el cierre de ayer se marcaba como "precio negociado".
+
+**Barras intradía.**
+- **Caché compartida:** una descarga por (símbolo, intervalo, periodo) cada 60 s (`PROFITLAB_BARS_TTL`), para todas las vistas y usuarios, con un solo hilo descargando.
+- **Fuente más reciente:** se usa la primera fuente que tenga la sesión esperada. Si Massive (Basic) solo trae hasta ayer, se pasa a Yahoo.
+- **Último dato bueno:** si todas las fuentes fallan, se sirve el último válido con aviso.
+- **Cortocircuito:** si el plan no da la barra de hoy, Massive no se vuelve a consultar en 10 minutos (`PROFITLAB_INTRADAY_COOLDOWN`), para no frenar las respuestas con los reintentos del límite de 5 llamadas/min.
+
+**Diagnóstico público:** `GET /api/health?probe=SPX500` indica el subyacente usado, el motivo del sustituto, el origen del spot, las fuentes de IV y las barras (fuente, sesión y errores). No incluye datos de usuarios.
 
 ## GEX / DEX (Gamma & Flow, Espectro 2D/3D, GEX Heatmap)
 

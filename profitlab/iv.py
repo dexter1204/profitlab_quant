@@ -74,3 +74,48 @@ def snapshot(
     else:
         reading = "Insufficient HV history."
     return IVSnapshot(iv_atm, hv10, hv30, hv60, premium, ratio, ts, reading)
+
+
+def fill_from_quotes(chain: pd.DataFrame, spot: float, asof: pd.Timestamp,
+                     r: float = 0.045, q: float = 0.0) -> tuple[pd.DataFrame, dict]:
+    """IV de los contratos SIN IV del proveedor, calculada desde su precio
+    (mid bid/ask; si no, último) invirtiendo Black-Scholes con el mismo T que
+    usan las griegas (máx(días, 1)/365). Nada se inventa: si el precio no es
+    coherente queda la mediana del vencimiento (como antes) o NaN.
+
+    Añade `iv_source`: 'vendor' | 'quotes' | 'median' | 'none'."""
+    from . import greeks
+
+    df = chain.copy()
+    vendor_missing = df["iv_imputed"].to_numpy(bool) if "iv_imputed" in df.columns \
+        else df["iv"].isna().to_numpy()
+    src = np.where(vendor_missing, "median", "vendor").astype(object)
+    bid = pd.to_numeric(df.get("bid"), errors="coerce")
+    ask = pd.to_numeric(df.get("ask"), errors="coerce")
+    mid = (bid + ask) / 2.0
+    px = mid.where((bid > 0) & (ask > 0) & (ask >= bid)).fillna(pd.to_numeric(df.get("last"), errors="coerce"))
+    days = (pd.to_datetime(df["expiry"]) - asof).dt.total_seconds() / 86400.0
+    t = np.maximum(days.to_numpy(), 1.0) / 365.0
+    solved = np.full(len(df), np.nan)
+    if vendor_missing.any():
+        idx = np.nonzero(vendor_missing)[0]
+        solved[idx] = greeks.implied_vol(px.to_numpy(float)[idx], spot,
+                                         df["strike"].to_numpy(float)[idx], t[idx], r, q,
+                                         df["type"].str.lower().to_numpy()[idx])
+    use = vendor_missing & np.isfinite(solved)
+    ivv = df["iv"].to_numpy(float).copy()
+    ivv[use] = solved[use]
+    src[use] = "quotes"
+    src[~np.isfinite(ivv)] = "none"
+    df["iv"] = ivv
+    df["iv_source"] = src
+    n = len(df) or 1
+    stats = {
+        "vendor_pct": round(float((src == "vendor").sum()) / n * 100, 1),
+        "quotes_pct": round(float((src == "quotes").sum()) / n * 100, 1),
+        "median_pct": round(float((src == "median").sum()) / n * 100, 1),
+        "none_pct": round(float((src == "none").sum()) / n * 100, 1),
+    }
+    df.attrs.update(chain.attrs)
+    df.attrs["iv_missing"] = bool(np.isnan(ivv).all())
+    return df, stats

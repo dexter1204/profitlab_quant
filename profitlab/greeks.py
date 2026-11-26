@@ -112,3 +112,45 @@ def charm(spot, strike, t, r, sigma, q=0.0, kind="call"):
     if kind == "call":
         return q * disc_q * norm.cdf(d1) - common
     return -q * disc_q * norm.cdf(-d1) - common
+
+
+def price(spot, strike, t, r, sigma, q=0.0, kind="call"):
+    """Precio Black-Scholes europeo (con rendimiento continuo q)."""
+    d1, d2 = _d1_d2(spot, strike, t, r, sigma, q)
+    df_q, df_r = np.exp(-q * t), np.exp(-r * t)
+    call = spot * df_q * norm.cdf(d1) - strike * df_r * norm.cdf(d2)
+    if kind == "call":
+        return call
+    return call - spot * df_q + strike * df_r          # paridad put-call
+
+
+def implied_vol(opt_price, spot, strike, t, r, q=0.0, kind="call",
+                lo: float = 0.01, hi: float = 5.0, iters: int = 80):
+    """Volatilidad implícita por inversión de Black-Scholes (bisección
+    vectorizada; el precio BS es monótono en sigma). Devuelve NaN cuando el
+    precio no es coherente (≤ valor intrínseco descontado o ≥ cota superior),
+    en vez de forzar un número. `kind` puede ser escalar o array de
+    'call'/'put'."""
+    p = np.asarray(opt_price, dtype=float)
+    S = np.broadcast_to(np.asarray(spot, dtype=float), p.shape)
+    K = np.broadcast_to(np.asarray(strike, dtype=float), p.shape)
+    T = np.broadcast_to(np.asarray(t, dtype=float), p.shape)
+    kinds = np.broadcast_to(np.asarray(kind), p.shape)
+    is_call = kinds == "call"
+    df_q, df_r = np.exp(-q * T), np.exp(-r * T)
+    intrinsic = np.where(is_call, np.maximum(S * df_q - K * df_r, 0.0),
+                         np.maximum(K * df_r - S * df_q, 0.0))
+    upper = np.where(is_call, S * df_q, K * df_r)
+    ok = np.isfinite(p) & (p > intrinsic + 1e-9) & (p < upper) & (T > 0) & (S > 0) & (K > 0)
+    a = np.full(p.shape, lo)
+    b = np.full(p.shape, hi)
+    for _ in range(iters):
+        m = 0.5 * (a + b)
+        pm = np.where(is_call, price(S, K, T, r, m, q, "call"), price(S, K, T, r, m, q, "put"))
+        above = pm > p
+        b = np.where(above, m, b)
+        a = np.where(above, a, m)
+    iv = 0.5 * (a + b)
+    # en los extremos del intervalo no hubo solución real
+    iv = np.where(ok & (iv > lo * 1.001) & (iv < hi * 0.999), iv, np.nan)
+    return iv
